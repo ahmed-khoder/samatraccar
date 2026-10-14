@@ -1,0 +1,22 @@
+services:
+  tracar:
+    build: .
+    image: tracar:latest
+    container_name: tracar
+    restart: unless-stopped
+    env_file: .env          # TRACCAR_URL, COOKIE_SECURE
+    environment:
+      CACHE_DIR: /data
+    volumes:
+      - tracar-data:/data   # analytics + address cache survive restarts
+    ports:
+      - "3000:3000"         # remove this line if only Nginx Proxy Manager (same docker network) reaches the app
+    # To share a network with Nginx Proxy Manager, uncomment:
+    # networks: [proxy]
+
+volumes:
+  tracar-data:
+
+# networks:
+#   proxy:
+#     external: true       # the network your Nginx Proxy Manager container is on

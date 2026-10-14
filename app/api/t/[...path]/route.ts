@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { TRACCAR_URL, getToken } from "@/lib/traccar";
+import { traccarUrl, getToken } from "@/lib/traccar";
 
 async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
   const token = await getToken();
   if (!token) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { path } = await ctx.params;
-  const url = `${TRACCAR_URL}/api/${path.join("/")}${req.nextUrl.search}`;
+  const url = `${traccarUrl()}/api/${path.join("/")}${req.nextUrl.search}`;
   const hasBody = req.method !== "GET";
-  const r = await fetch(url, {
+  let r: Response;
+  try {
+    r = await fetch(url, {
     method: req.method,
     headers: {
       Authorization: `Bearer ${token}`,
@@ -16,7 +18,11 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
     },
     body: hasBody ? await req.text() : undefined,
     cache: "no-store",
-  });
+    signal: AbortSignal.timeout(30000),
+    });
+  } catch {
+    return NextResponse.json({ error: "upstream unavailable" }, { status: 502 });
+  }
   const res = new NextResponse(r.body, {
     status: r.status,
     headers: { "Content-Type": r.headers.get("content-type") || "application/json" },
@@ -26,9 +32,14 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
 }
 
 export const GET = forward;
-// POST is limited to sending device commands
+// Writes are limited to: sending commands, and editing a device (name / category / colour).
 export async function POST(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
   const { path } = await ctx.params;
   if (path.join("/") !== "commands/send") return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  return forward(req, ctx);
+}
+export async function PUT(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
+  const { path } = await ctx.params;
+  if (!(path.length === 2 && path[0] === "devices" && /^\d+$/.test(path[1]))) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   return forward(req, ctx);
 }

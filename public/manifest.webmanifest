@@ -1,0 +1,9 @@
+{
+  "name": "Tracar — Fleet Intelligence",
+  "short_name": "Tracar",
+  "start_url": "/live",
+  "display": "standalone",
+  "background_color": "#070b14",
+  "theme_color": "#070b14",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
