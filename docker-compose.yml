@@ -10,7 +10,7 @@ services:
     volumes:
       - tracar-data:/data   # analytics + address cache survive restarts
     ports:
-      - "3000:3000"         # remove this line if only Nginx Proxy Manager (same docker network) reaches the app
+      - "${APP_PORT:-3000}:3000"   # host port; remove this line if only Nginx Proxy Manager (same docker network) reaches the app
     # To share a network with Nginx Proxy Manager, uncomment:
     # networks: [proxy]
 

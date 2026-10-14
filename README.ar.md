@@ -43,13 +43,16 @@
 ## التشغيل السريع (Docker)
 
 ```bash
-git clone <رابط-المستودع> tracar && cd tracar
+git clone https://github.com/elblasy33/samatraccar.git
+cd samatraccar
 cp .env.example .env
 nano .env                      # اضبط TRACCAR_URL=https://عنوان-سيرفر-traccar
 docker compose up -d --build   # ← http://<ip-السيرفر>:3000
 ```
 
 سجّل الدخول بالبريد وكلمة المرور الخاصة بحسابك في Traccar.
+
+> المنفذ 3000 مشغول؟ أضف `APP_PORT=3300` (أي منفذ فاضي) في `.env`.
 
 > تفتح التطبيق على `http://` عادي (قبل الدومين و HTTPS)؟ أضف `COOKIE_SECURE=false` في `.env`،
 > وإلا لن يحتفظ المتصفح بكوكي الجلسة. احذفها بعد التحويل إلى HTTPS.
@@ -58,13 +61,15 @@ docker compose up -d --build   # ← http://<ip-السيرفر>:3000
 
 ```bash
 docker compose logs -f tracar     # السجلات
-docker compose up -d --build      # تحديث بعد سحب كود جديد
+git pull && docker compose up -d --build   # تحديث لآخر نسخة من الكود
 docker compose down               # إيقاف (يبقى حجم الكاش)
 ```
 
 ## التشغيل للتطوير
 
 ```bash
+git clone https://github.com/elblasy33/samatraccar.git
+cd samatraccar
 cp .env.example .env.local        # اضبط TRACCAR_URL
 npm install
 npm run dev                       # http://localhost:3000
@@ -84,6 +89,7 @@ npm run dev                       # http://localhost:3000
 | `TRACCAR_URL` | ✅ | – | عنوان سيرفر Traccar بدون `/` في النهاية. يُقرأ وقت الطلب، فصورة واحدة تصلح لأي سيرفر. |
 | `COOKIE_SECURE` | – | `true` في الإنتاج | اجعله `false` فقط عند التجربة على HTTP عادي. يجب أن يبقى `true` خلف HTTPS. |
 | `CACHE_DIR` | – | `./.cache` (`/data` في Docker) | مكان تخزين كاش التحليلات والعناوين. موصول كـ volume في `docker-compose.yml`. |
+| `APP_PORT` | – | `3000` | المنفذ الذي ينشره Docker على السيرفر (`docker-compose.yml`). غيّره إن كان 3000 مشغولًا. |
 | `PORT` / `HOSTNAME` | – | `3000` / `0.0.0.0` (Docker) | إعدادات خادم Next.js القياسية. |
 
 تفضيلات المستخدم (الثيم، أماكن القوائم، نمط الخريطة، حد السرعة، تحويل العناوين) تُحفظ في المتصفح وكوكي صغير —

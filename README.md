@@ -42,13 +42,16 @@ Traccar REST API and gives you a modern UI for operations and management:
 ## Quick start (Docker)
 
 ```bash
-git clone <your-repo-url> tracar && cd tracar
+git clone https://github.com/elblasy33/samatraccar.git
+cd samatraccar
 cp .env.example .env
 nano .env                      # set TRACCAR_URL=https://your-traccar-server
 docker compose up -d --build   # → http://<server-ip>:3000
 ```
 
 Sign in with your Traccar email and password.
+
+> Port 3000 already in use? Add `APP_PORT=3300` (any free port) to `.env`.
 
 > Opening the app over plain `http://` (before you have a domain/HTTPS)? Add `COOKIE_SECURE=false` to `.env`,
 > otherwise the browser will not keep the session cookie. Remove it once you are behind HTTPS.
@@ -57,13 +60,15 @@ Useful commands:
 
 ```bash
 docker compose logs -f tracar     # logs
-docker compose up -d --build      # update after pulling new code
+git pull && docker compose up -d --build   # update to the latest code
 docker compose down               # stop (cache volume is kept)
 ```
 
 ## Quick start (development)
 
 ```bash
+git clone https://github.com/elblasy33/samatraccar.git
+cd samatraccar
 cp .env.example .env.local        # set TRACCAR_URL
 npm install
 npm run dev                       # http://localhost:3000
@@ -83,6 +88,7 @@ All configuration is through environment variables.
 | `TRACCAR_URL` | ✅ | – | Base URL of your Traccar server, no trailing slash. Read at request time, so one image works for any server. |
 | `COOKIE_SECURE` | – | `true` in production | Set to `false` only when testing over plain HTTP. Must stay `true` behind HTTPS. |
 | `CACHE_DIR` | – | `./.cache` (`/data` in Docker) | Where the analytics and address caches are stored. Mounted as a volume in `docker-compose.yml`. |
+| `APP_PORT` | – | `3000` | Host port Docker publishes (`docker-compose.yml`). Change it if 3000 is taken. |
 | `PORT` / `HOSTNAME` | – | `3000` / `0.0.0.0` (Docker) | Standard Next.js server settings. |
 
 User preferences (theme, menu positions, default map style, overspeed limit, address lookup) are stored in the
