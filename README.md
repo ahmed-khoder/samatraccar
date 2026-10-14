@@ -53,8 +53,8 @@ Sign in with your Traccar email and password.
 
 > Port 3000 already in use? Add `APP_PORT=3300` (any free port) to `.env`.
 
-> Opening the app over plain `http://` (before you have a domain/HTTPS)? Add `COOKIE_SECURE=false` to `.env`,
-> otherwise the browser will not keep the session cookie. Remove it once you are behind HTTPS.
+> Works over plain `http://ip:3000` and behind HTTPS alike — the session cookie's `Secure` flag is detected automatically
+> (set `COOKIE_SECURE=true|false` only to force it).
 
 Useful commands:
 
@@ -86,7 +86,7 @@ All configuration is through environment variables.
 | Variable | Required | Default | Description |
 |---|:--:|---|---|
 | `TRACCAR_URL` | ✅ | – | Base URL of your Traccar server, no trailing slash. Read at request time, so one image works for any server. |
-| `COOKIE_SECURE` | – | `true` in production | Set to `false` only when testing over plain HTTP. Must stay `true` behind HTTPS. |
+| `COOKIE_SECURE` | – | auto | Auto-detected per request (HTTPS or `X-Forwarded-Proto: https` ⇒ secure, plain HTTP ⇒ not). Set `true`/`false` only to force it. |
 | `CACHE_DIR` | – | `./.cache` (`/data` in Docker) | Where the analytics and address caches are stored. Mounted as a volume in `docker-compose.yml`. |
 | `APP_PORT` | – | `3000` | Host port Docker publishes (`docker-compose.yml`). Change it if 3000 is taken. |
 | `PORT` / `HOSTNAME` | – | `3000` / `0.0.0.0` (Docker) | Standard Next.js server settings. |
@@ -106,7 +106,7 @@ browser and a small cookie — they are per device, not per Traccar account. The
    * *Scheme*: `http` · *Forward Hostname / IP*: `tracar` (or the server IP) · *Forward Port*: `3000`
    * Enable **Block Common Exploits** and **Websockets Support**
 4. **SSL** tab → *Request a new SSL certificate* (Let's Encrypt) → enable **Force SSL** and **HTTP/2**.
-5. Leave `COOKIE_SECURE` unset. Open `https://tracar.example.com` and sign in.
+5. Leave `COOKIE_SECURE` unset (NPM sends `X-Forwarded-Proto`, so secure cookies are enabled automatically). Open `https://tracar.example.com` and sign in.
 
 Long reports are fetched in short (≤ 7 day) requests, so the default proxy timeouts are sufficient.
 
@@ -173,7 +173,7 @@ lib/                  analytics engine, API hooks, i18n dictionary, preferences,
 
 | Symptom | Fix |
 |---|---|
-| Login works but you are bounced back to the login page | You are on plain HTTP with secure cookies — use HTTPS, or set `COOKIE_SECURE=false` for testing. |
+| Login works but you are bounced back to the login page | The browser dropped the session cookie. Update to the latest version (auto-detects HTTP/HTTPS); if you forced `COOKIE_SECURE=true` while using plain HTTP, remove it. |
 | `TRACCAR_URL is not set` | Create `.env` (Docker) or `.env.local` (dev) from `.env.example`. |
 | Reports are empty for old dates | Traccar only has data from when the devices started reporting. |
 | "Some days could not be loaded" | The Traccar server dropped a connection; reload — finished days are cached, so only the missing ones are retried. |

@@ -54,8 +54,8 @@ docker compose up -d --build   # ← http://<ip-السيرفر>:3000
 
 > المنفذ 3000 مشغول؟ أضف `APP_PORT=3300` (أي منفذ فاضي) في `.env`.
 
-> تفتح التطبيق على `http://` عادي (قبل الدومين و HTTPS)؟ أضف `COOKIE_SECURE=false` في `.env`،
-> وإلا لن يحتفظ المتصفح بكوكي الجلسة. احذفها بعد التحويل إلى HTTPS.
+> يعمل على `http://ip:3000` العادي وخلف HTTPS بنفس الطريقة — علامة `Secure` في كوكي الجلسة تُكتشف تلقائيًا
+> (اضبط `COOKIE_SECURE=true|false` فقط لفرضها).
 
 أوامر مفيدة:
 
@@ -87,7 +87,7 @@ npm run dev                       # http://localhost:3000
 | المتغير | مطلوب | الافتراضي | الوصف |
 |---|:--:|---|---|
 | `TRACCAR_URL` | ✅ | – | عنوان سيرفر Traccar بدون `/` في النهاية. يُقرأ وقت الطلب، فصورة واحدة تصلح لأي سيرفر. |
-| `COOKIE_SECURE` | – | `true` في الإنتاج | اجعله `false` فقط عند التجربة على HTTP عادي. يجب أن يبقى `true` خلف HTTPS. |
+| `COOKIE_SECURE` | – | تلقائي | يُكتشف لكل طلب (HTTPS أو `X-Forwarded-Proto: https` ⇒ آمن، HTTP عادي ⇒ غير آمن). اضبطه `true`/`false` فقط لفرضه. |
 | `CACHE_DIR` | – | `./.cache` (`/data` في Docker) | مكان تخزين كاش التحليلات والعناوين. موصول كـ volume في `docker-compose.yml`. |
 | `APP_PORT` | – | `3000` | المنفذ الذي ينشره Docker على السيرفر (`docker-compose.yml`). غيّره إن كان 3000 مشغولًا. |
 | `PORT` / `HOSTNAME` | – | `3000` / `0.0.0.0` (Docker) | إعدادات خادم Next.js القياسية. |
@@ -107,7 +107,7 @@ npm run dev                       # http://localhost:3000
    * *Scheme*: `http` · *Forward Hostname / IP*: `tracar` (أو IP السيرفر) · *Forward Port*: `3000`
    * فعّل **Block Common Exploits** و **Websockets Support**
 4. تبويب **SSL** ← *Request a new SSL certificate* (Let's Encrypt) ← فعّل **Force SSL** و **HTTP/2**.
-5. اترك `COOKIE_SECURE` بدون ضبط. افتح `https://tracar.example.com` وسجّل الدخول.
+5. اترك `COOKIE_SECURE` بدون ضبط (NPM يرسل `X-Forwarded-Proto` فيُفعَّل الكوكي الآمن تلقائيًا). افتح `https://tracar.example.com` وسجّل الدخول.
 
 التقارير الطويلة تُجلب على طلبات قصيرة (≤ 7 أيام)، فمهلات الـ proxy الافتراضية كافية.
 
@@ -172,7 +172,7 @@ lib/                  محرك التحليلات، hooks الـ API، قامو�
 
 | العَرَض | الحل |
 |---|---|
-| الدخول ينجح ثم تعود لصفحة الدخول | تعمل على HTTP مع كوكي آمن — استخدم HTTPS أو `COOKIE_SECURE=false` للتجربة. |
+| الدخول ينجح ثم تعود لصفحة الدخول | المتصفح أسقط كوكي الجلسة. حدّث لآخر نسخة (تكتشف HTTP/HTTPS تلقائيًا)؛ وإن كنت فرضت `COOKIE_SECURE=true` مع HTTP عادي فاحذفها. |
 | `TRACCAR_URL is not set` | أنشئ `.env` (Docker) أو `.env.local` (تطوير) من `.env.example`. |
 | التقارير فارغة لتواريخ قديمة | Traccar لا يملك بيانات قبل بدء الأجهزة بالإرسال. |
 | "تعذّر تحميل بعض الأيام" | السيرفر قطع اتصالًا؛ أعد التحميل — الأيام المنتهية مخزّنة فيُعاد جلب الناقص فقط. |

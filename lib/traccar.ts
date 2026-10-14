@@ -10,8 +10,17 @@ export function traccarUrl() {
 
 export const TOKEN_COOKIE = "tc_token";
 
-/** Cookie `secure` flag: on in production unless COOKIE_SECURE=false (needed when reaching the app over plain http, e.g. http://ip:3000). */
-export const cookieSecure = () => (process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === "true" : process.env.NODE_ENV === "production");
+/**
+ * Cookie `secure` flag. Auto-detected from the request: HTTPS (directly, or via a reverse proxy that sends
+ * X-Forwarded-Proto: https, like Nginx Proxy Manager) => secure; plain HTTP => not secure, otherwise the browser
+ * would silently drop the cookie and login would loop. COOKIE_SECURE=true|false overrides the detection.
+ */
+export function cookieSecure(req?: Request) {
+  const o = process.env.COOKIE_SECURE;
+  if (o === "true" || o === "false") return o === "true";
+  const proto = req?.headers.get("x-forwarded-proto")?.split(",")[0].trim() || (req ? new URL(req.url).protocol.replace(":", "") : "");
+  return proto === "https";
+}
 
 export async function getToken() {
   return (await cookies()).get(TOKEN_COOKIE)?.value;
