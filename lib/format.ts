@@ -1,3 +1,5 @@
+import { TZ, addDays as addDaysTz, dayKey, fromWall, startOfDay, wall } from "./tz";
+
 let LOCALE = "en-GB";
 export const setLocale = (l: string) => { LOCALE = l; };
 export const getLocale = () => LOCALE;
@@ -25,13 +27,13 @@ export function fmtDuration(ms: number) {
 export function fmtDateTime(iso?: string | null) {
   if (!iso) return "—";
   return new Date(iso).toLocaleString(LOCALE, {
-    day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false,
+    day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: TZ,
   });
 }
 
 export function fmtTime(iso?: string | null) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleTimeString(LOCALE, { hour: "2-digit", minute: "2-digit", hour12: false });
+  return new Date(iso).toLocaleTimeString(LOCALE, { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: TZ });
 }
 
 export function timeAgo(iso?: string | null) {
@@ -47,8 +49,9 @@ export function timeAgo(iso?: string | null) {
 
 export type Range = "today" | "yesterday" | "7d" | "30d" | "month" | "lastmonth";
 
-const sod = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
-const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+// day boundaries are Cairo midnights (see lib/tz), not the viewer's local ones
+const sod = (d: Date) => new Date(startOfDay(d.getTime()));
+const addDays = (d: Date, n: number) => new Date(addDaysTz(d.getTime(), n));
 
 export function rangeDates(r: Range): { from: string; to: string } {
   const now = new Date();
@@ -57,17 +60,18 @@ export function rangeDates(r: Range): { from: string; to: string } {
   if (r === "yesterday") { from = addDays(today, -1); to = today; }
   if (r === "7d") from = addDays(today, -6);
   if (r === "30d") from = addDays(today, -29);
-  if (r === "month") from = new Date(now.getFullYear(), now.getMonth(), 1);
-  if (r === "lastmonth") { from = new Date(now.getFullYear(), now.getMonth() - 1, 1); to = new Date(now.getFullYear(), now.getMonth(), 1); }
+  const w = wall(now.getTime());
+  if (r === "month") from = new Date(fromWall(w.y, w.m, 1));
+  if (r === "lastmonth") { from = new Date(fromWall(w.y, w.m - 1, 1)); to = new Date(fromWall(w.y, w.m, 1)); }
   return { from: from.toISOString(), to: to.toISOString() };
 }
 
-/** yyyy-mm-dd (local) -> inclusive day range. */
+/** yyyy-mm-dd (Cairo days) -> inclusive day range. */
 export function customRange(fromDate: string, toDate: string) {
   const [fy, fm, fd] = fromDate.split("-").map(Number);
   const [ty, tm, td] = toDate.split("-").map(Number);
-  const from = new Date(fy, fm - 1, fd);
-  const end = addDays(new Date(ty, tm - 1, td), 1);
+  const from = new Date(fromWall(fy, fm, fd));
+  const end = new Date(fromWall(ty, tm, td + 1));
   const to = end.getTime() > Date.now() ? new Date() : end;
   return { from: from.toISOString(), to: to.toISOString() };
 }
@@ -76,16 +80,19 @@ export function customRange(fromDate: string, toDate: string) {
 export function prevRange(w: { from: string; to: string }) {
   const from = sod(new Date(w.from));
   const to = sod(new Date(w.to));
+  // round: a range across a DST change is a whole number of days that is 1 h short or long
   const days = Math.max(1, Math.round((to.getTime() - from.getTime()) / 864e5) + (new Date(w.to).getTime() > to.getTime() ? 1 : 0));
   return { from: addDays(from, -days).toISOString(), to: from.toISOString() };
 }
 
-export const toDateInput = (iso: string) => {
-  const d = new Date(iso);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-};
-export const daysIn = (w: { from: string; to: string }) =>
-  Math.max(1, Math.ceil((new Date(w.to).getTime() - sod(new Date(w.from)).getTime()) / 864e5));
+export const toDateInput = (iso: string) => dayKey(new Date(iso).getTime());
+/** Number of Cairo calendar days the window touches (counted, since a day can be 23 or 25 h long). */
+export function daysIn(w: { from: string; to: string }) {
+  const end = new Date(w.to).getTime();
+  let n = 0;
+  for (let d = startOfDay(new Date(w.from).getTime()); d < end && n < 400; d = addDaysTz(d, 1)) n++;
+  return Math.max(1, n);
+}
 
 export function toCsv(rows: Record<string, unknown>[]) {
   if (!rows.length) return "";
@@ -105,10 +112,33 @@ export function speedColor(kmh: number) {
 /** A GPS fix dated before 2020 means the receiver has no real fix (clock/week-rollover bug) — the position is stale. */
 export const hasRealFix = (p?: { fixTime: string } | null) => !!p && Date.parse(p.fixTime) > Date.parse("2020-01-01");
 
-export function deviceState(d: { status: string }, p?: { speed: number; fixTime: string }) {
+type Fix = { speed: number; fixTime: string; serverTime?: string; valid?: boolean };
+type Times = { fixTime: string; serverTime?: string };
+
+/** fixTime later than the time the server received it: the tracker clock runs ahead (e.g. a GT06 left on UTC+8). */
+export const clockAhead = (p?: Times | null) => !!p?.serverTime && Date.parse(p.fixTime) - Date.parse(p.serverTime) > 2 * 60000;
+
+/**
+ * When the shown location was really measured (ISO), or null when that can't be known.
+ * - normal clock: the fix time.
+ * - clock ahead by whole hours (a timezone mistake) and received right away: a live fix, measured when it arrived.
+ * - clock ahead by anything else: a status packet repeating an old location, whose real age is unknown.
+ */
+export function fixAt(p: Times): string | null {
+  if (!clockAhead(p)) return p.fixTime;
+  const ahead = Date.parse(p.fixTime) - Date.parse(p.serverTime!), off = ahead % 36e5;
+  return off < 3 * 60000 || off > 36e5 - 3 * 60000 ? p.serverTime! : null;
+}
+
+const FRESH_MS = 5 * 60000;
+
+export function deviceState(d: { status: string }, p?: Fix) {
   if (d.status !== "online") return d.status === "offline" ? "offline" : "unknown";
-  if (p && !hasRealFix(p)) return "nofix";
-  return knToKmh(p?.speed) > 2 ? "moving" : "stopped";
+  if (p && (!hasRealFix(p) || p.valid === false)) return "nofix"; // no GPS fix: the coordinates are not a current measurement
+  // a repeated old location keeps the speed it had back then — that is not "moving now"
+  const at = p ? fixAt(p) : null;
+  const fresh = !!at && Date.now() - Date.parse(at) < FRESH_MS;
+  return fresh && knToKmh(p?.speed) > 2 ? "moving" : "stopped";
 }
 
 export const STATE_COLOR: Record<string, string> = {
@@ -118,3 +148,12 @@ export const STATE_COLOR: Record<string, string> = {
   offline: "#64748b",
   unknown: "#64748b",
 };
+
+export type VisualState = "over" | "moving" | "idle" | "stopped" | "offline" | "nofix";
+
+/** Finer-grained status for colouring: overspeed, and stopped-with-engine-on ("idle"). */
+export function visualState(base: string, kmh: number, limit: number, ignition?: boolean): VisualState {
+  if (base === "moving") return kmh > limit ? "over" : "moving";
+  if (base === "stopped") return ignition ? "idle" : "stopped";
+  return base === "nofix" ? "nofix" : "offline";
+}

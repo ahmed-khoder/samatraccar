@@ -3,8 +3,10 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Palette, Battery, Clock, Search, History } from "lucide-react";
 import { useAnalytics, useDevices, usePositions } from "@/lib/api";
-import { deviceState, fmtNum, knToKmh, mToKm, rangeDates, STATE_COLOR, timeAgo } from "@/lib/format";
-import { deviceColor, iconOf } from "@/lib/vehicle";
+import { fmtNum, knToKmh, mToKm, rangeDates, timeAgo } from "@/lib/format";
+import { iconOf } from "@/lib/vehicle";
+import { vehState } from "@/lib/vstate";
+import { usePrefs } from "@/lib/prefs";
 import { useI18n } from "@/lib/i18n";
 import type { Device } from "@/lib/types";
 import DeviceEditor from "@/components/DeviceEditor";
@@ -12,6 +14,7 @@ import { Skeleton } from "@/components/ui";
 
 export default function Vehicles() {
   const { t } = useI18n();
+  const { prefs } = usePrefs();
   const { data: devices } = useDevices();
   const { data: positions } = usePositions();
   const range = useMemo(() => rangeDates("today"), []);
@@ -38,8 +41,7 @@ export default function Vehicles() {
         {!devices && Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-40" />)}
         {list.map((d) => {
           const p = pos.get(d.id);
-          const st = deviceState(d, p);
-          const c = deviceColor(d) || STATE_COLOR[st];
+          const { base: st, vs, color: c } = vehState(prefs, d, p);
           const I = iconOf(d.category);
           const today = an.perDevice.get(d.id);
           return (
@@ -48,8 +50,8 @@ export default function Vehicles() {
                 <span className="size-12 rounded-2xl grid place-items-center shrink-0" style={{ background: c + "22", color: c }}><I size={26} /></span>
                 <div className="min-w-0 flex-1">
                   <h3 className="font-semibold truncate">{d.name}</h3>
-                  <p className="text-xs flex items-center gap-1.5" style={{ color: STATE_COLOR[st] }}>
-                    <span className="size-2 rounded-full" style={{ background: STATE_COLOR[st] }} />{t(`state.${st === "unknown" ? "offline" : st}` as const)}
+                  <p className="text-xs flex items-center gap-1.5" style={{ color: c }}>
+                    <span className="size-2 rounded-full" style={{ background: c }} />{t(`state.${vs === "nofix" ? "nofix" : vs === "offline" ? "offline" : vs}` as const)}
                     <span className="text-muted">· {fmtNum(knToKmh(p?.speed))} {t("unit.kmh")}</span>
                   </p>
                 </div>

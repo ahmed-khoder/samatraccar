@@ -13,12 +13,13 @@ import Overview from "@/components/reports/Overview";
 import Summary from "@/components/reports/Summary";
 import Daily from "@/components/reports/Daily";
 import TripsTab from "@/components/reports/TripsTab";
+import Waiting from "@/components/reports/Waiting";
 import Behavior from "@/components/reports/Behavior";
 import Compare from "@/components/reports/Compare";
 import EventsTab from "@/components/reports/EventsTab";
 import type { Key } from "@/lib/dict";
 
-const TABS = ["overview", "summary", "daily", "trips", "stops", "behavior", "compare", "events"] as const;
+const TABS = ["overview", "summary", "daily", "trips", "stops", "wait", "behavior", "compare", "events"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function Reports() {
@@ -119,6 +120,7 @@ export default function Reports() {
       {tab === "daily" && <Daily ctx={ctx} />}
       {tab === "trips" && <TripsTab ctx={ctx} kind="trips" />}
       {tab === "stops" && <TripsTab ctx={ctx} kind="stops" />}
+      {tab === "wait" && <Waiting ctx={ctx} />}
       {tab === "behavior" && <Behavior ctx={ctx} />}
       {tab === "compare" && <Compare ctx={ctx} />}
       {tab === "events" && <EventsTab ctx={ctx} />}

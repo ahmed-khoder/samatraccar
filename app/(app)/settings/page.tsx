@@ -3,6 +3,7 @@ import { useRouter } from "next/navigation";
 import { Moon, Sun, MonitorCog, LogOut, RotateCcw } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { usePrefs, type Prefs } from "@/lib/prefs";
+import { STATE_PALETTE } from "@/lib/prefs-shared";
 import { Card } from "@/components/ui";
 import type { Key } from "@/lib/dict";
 
@@ -36,6 +37,12 @@ const Row = ({ title, hint, children }: { title: string; hint?: string; children
     <div>{children}</div>
   </div>
 );
+
+type ColorKey = "cMoving" | "cIdle" | "cStopped" | "cOver" | "cOffline";
+const COLOR_ROWS: { k: ColorKey; label: Key }[] = [
+  { k: "cMoving", label: "set.c.moving" }, { k: "cIdle", label: "set.c.idle" }, { k: "cStopped", label: "set.c.stopped" },
+  { k: "cOver", label: "set.c.over" }, { k: "cOffline", label: "set.c.offline" },
+];
 
 export default function SettingsPage() {
   const { t, lang, setLang } = useI18n();
@@ -99,6 +106,47 @@ export default function SettingsPage() {
           </Row>
           <Row title={t("map.trails")}>{yesno("trails")}</Row>
           <Row title={t("map.labels")}>{yesno("labels")}</Row>
+        </Card>
+
+        <Card id="s.veh" title={t("set.vehicles")} collapsible={false}>
+          <Row title={t("set.colormode")} hint={t("set.cm.hint")}>
+            <Seg value={prefs.colorMode} onChange={(v) => set({ colorMode: v })} options={[{ v: "state", label: t("set.cm.state") }, { v: "device", label: t("set.cm.device") }]} />
+          </Row>
+          <Row title={t("set.autoscale")} hint={t("set.autoscalehint")}>
+            <Seg value={prefs.autoScale ? "on" : "off"} onChange={(v) => set({ autoScale: v === "on" })} options={[{ v: "on", label: t("common.on") }, { v: "off", label: t("common.off") }]} />
+          </Row>
+          <Row title={t("set.iconsize")}>
+            <div className="flex items-center gap-3 max-w-md" dir="ltr">
+              <input type="range" min={0.5} max={2} step={0.1} value={prefs.iconSize} onChange={(e) => set({ iconSize: +e.target.value })} className="flex-1 accent-cyan-500" />
+              <span className="tabular-nums w-14 text-sm">{Math.round(prefs.iconSize * 100)}%</span>
+            </div>
+          </Row>
+          {prefs.colorMode === "state" && (
+            <Row title={t("nav.vehicles")}>
+              <div className="space-y-2.5">
+                {COLOR_ROWS.map(({ k, label }) => (
+                  <div key={k}>
+                    <label className="flex items-center gap-3 text-sm">
+                      <input type="color" value={prefs[k]} onChange={(e) => set({ [k]: e.target.value } as Partial<Prefs>)}
+                        className="size-8 rounded-lg border border-line bg-transparent cursor-pointer p-0.5" />
+                      <span className="flex-1">{t(label)}</span>
+                      <span className="text-xs text-muted tabular-nums" dir="ltr">{prefs[k]}</span>
+                    </label>
+                    {k === "cOver" && (
+                      <div className="ms-11 mt-1.5">
+                        <div className="text-[11px] text-muted mb-1">{t("set.c.overhint")}</div>
+                        <div className="flex items-center gap-3 max-w-xs" dir="ltr">
+                          <input type="range" min={30} max={160} step={5} value={prefs.limit} onChange={(e) => set({ limit: +e.target.value })} className="flex-1 accent-cyan-500" />
+                          <span className="tabular-nums w-20 text-sm">{prefs.limit} {t("unit.kmh")}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+                <button className="btn" onClick={() => set(STATE_PALETTE)}><RotateCcw size={14} />{t("set.c.reset")}</button>
+              </div>
+            </Row>
+          )}
         </Card>
 
         <Card id="s.geo" title={t("set.addresses")} collapsible={false}>

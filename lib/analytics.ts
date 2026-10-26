@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { DayAgg, emptyAgg, TripSeg, StopSeg } from "./agg";
 import { traccarUrl } from "./traccar";
+import { addDays, dayKey, offsetMin as cairoOffset, startOfDay } from "./tz";
 
 interface P { fixTime: string; deviceTime: string; serverTime: string; latitude: number; longitude: number; speed: number; valid: boolean; attributes: { ignition?: boolean } }
 
@@ -38,7 +39,16 @@ export function haversine(a: P, b: P) {
   return 6371000 * 2 * Math.asin(Math.sqrt(x));
 }
 
-export function compute(pos: P[], offsetMin: number, limit: number): DayAgg {
+// Cairo hour of an instant; the offset only changes at DST, so it is looked up once per UTC hour
+const offs = new Map<number, number>();
+const cairoHour = (ms: number) => {
+  const k = Math.floor(ms / 36e5);
+  let o = offs.get(k);
+  if (o == null) { o = cairoOffset(k * 36e5); offs.set(k, o); }
+  return new Date(ms + o * 60000).getUTCHours();
+};
+
+export function compute(pos: P[], limit: number): DayAgg {
   const g = emptyAgg();
   g.tripList = []; g.stopList = [];
   const ps = pos.filter((p) => p.latitude !== 0 || p.longitude !== 0);
@@ -65,7 +75,7 @@ export function compute(pos: P[], offsetMin: number, limit: number): DayAgg {
     const okA = kmhA < 220, okB = kmhB < 220;
     if (okB) g.maxSpeed = Math.max(g.maxSpeed, kmhB);
     if (dt > 10 * 60000) { endTrip(); endStop(); pend = null; continue; } // data gap
-    const hour = new Date(ta - offsetMin * 60000).getUTCHours();
+    const hour = cairoHour(ta);
     const d = haversine(a, b);
     const implied = d / (dt / 1000) * 3.6;
     const moving = okA && kmhA >= 3;
@@ -122,28 +132,28 @@ async function pool<T, R>(items: T[], n: number, fn: (x: T) => Promise<R>) {
   return out;
 }
 
-export async function analyze(token: string, fromMs: number, toMs: number, offsetMin: number, limit: number, only?: number[]) {
+/** Per device and per Cairo calendar day (23–25 h long around DST). */
+export async function analyze(token: string, fromMs: number, toMs: number, limit: number, only?: number[]) {
   const c = load();
   const devices = await tget<{ id: number; name: string }[]>(token, "devices");
   const list = devices.filter((d) => !only || only.includes(d.id));
-  const DAY = 864e5;
-  const startLocal = Math.floor((fromMs - offsetMin * 60000) / DAY) * DAY; // local midnight expressed as UTC-shifted
-  const jobs: { id: number; day: string; s: number; e: number }[] = [];
-  for (let d = startLocal; d + offsetMin * 60000 < toMs; d += DAY) {
-    const s = d + offsetMin * 60000;
-    const day = new Date(d).toISOString().slice(0, 10);
-    for (const dev of list) jobs.push({ id: dev.id, day, s, e: s + DAY });
+  const jobs: { id: number; day: string; s: number; e: number; tag: string }[] = [];
+  for (let s = startOfDay(fromMs), n = 0; s < toMs && n < 400; s = addDays(s, 1), n++) {
+    const e = addDays(s, 1), o = cairoOffset(s);
+    // same cache tag as before (browser-style offset, e.g. -180) for ordinary days, so cached days stay valid; DST days get their own
+    const tag = cairoOffset(e - 1) === o ? String(-o) : "cairo";
+    for (const dev of list) jobs.push({ id: dev.id, day: dayKey(s), s, e, tag });
   }
   const now = Date.now();
   const result: Record<string, { name: string; days: Record<string, DayAgg> }> = {};
   list.forEach((d) => { result[d.id] = { name: d.name, days: {} }; });
   await pool(jobs, 6, async (j) => {
-    const key = `v2|${j.id}|${j.day}|${offsetMin}|${limit}`;
+    const key = `v2|${j.id}|${j.day}|${j.tag}|${limit}`;
     const hit = c.get(key);
     if (hit && (hit.final || now - hit.at < 45000)) { result[j.id].days[j.day] = hit.agg; return; }
     const q = new URLSearchParams({ deviceId: String(j.id), from: new Date(j.s).toISOString(), to: new Date(Math.min(j.e, now + 36e5 * 12)).toISOString() });
     let agg: DayAgg;
-    try { agg = compute(await tget<P[]>(token, `reports/route?${q}`), offsetMin, limit); }
+    try { agg = compute(await tget<P[]>(token, `reports/route?${q}`), limit); }
     catch { agg = hit?.agg ?? emptyAgg(); }
     // final once the day ended > 14h ago (devices may back-fill late; some clocks run hours ahead)
     const final = j.e < now - 14 * 36e5;

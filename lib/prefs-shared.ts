@@ -10,11 +10,24 @@ export interface Prefs {
   labels: boolean;
   tile: "auto" | "dark" | "light" | "sat" | "topo";
   geo: "server" | "osm" | "off";
+  /** "state" = colour by live status (palette below); "device" = the colour saved on each vehicle. */
+  colorMode: "state" | "device";
+  cMoving: string; cIdle: string; cStopped: string; cOver: string; cOffline: string;
+  /** Icons grow/shrink with the map zoom; iconSize is the user's extra multiplier. */
+  autoScale: boolean;
+  iconSize: number;
+  /** Map tool buttons: auto = hidden until the mouse nears the edge, pinned = always shown, hidden = only a small handle. */
+  ctl: "auto" | "pinned" | "hidden";
 }
+
+export const STATE_PALETTE = { cMoving: "#22c55e", cIdle: "#f59e0b", cStopped: "#ef4444", cOver: "#d946ef", cOffline: "#64748b" } as const;
 
 export const DEFAULT_PREFS: Prefs = {
   theme: "dark", nav: "start", navMode: "hover", list: "start", listMode: "hover", limit: 100, trails: true, labels: true, tile: "auto", geo: "server",
+  colorMode: "state", ...STATE_PALETTE, autoScale: true, iconSize: 1, ctl: "auto",
 };
+
+const hex = (v: unknown, d: string) => (typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v : d);
 
 export function parsePrefs(raw?: string | null): Prefs {
   if (!raw) return DEFAULT_PREFS;
@@ -32,6 +45,12 @@ export function parsePrefs(raw?: string | null): Prefs {
       labels: o.labels !== false,
       tile: pick(o.tile, ["auto", "dark", "light", "sat", "topo"], "auto"),
       geo: pick(o.geo, ["server", "osm", "off"], "server"),
+      colorMode: pick(o.colorMode, ["state", "device"], "state"),
+      cMoving: hex(o.cMoving, STATE_PALETTE.cMoving), cIdle: hex(o.cIdle, STATE_PALETTE.cIdle), cStopped: hex(o.cStopped, STATE_PALETTE.cStopped),
+      cOver: hex(o.cOver, STATE_PALETTE.cOver), cOffline: hex(o.cOffline, STATE_PALETTE.cOffline),
+      ctl: pick(o.ctl, ["auto", "pinned", "hidden"], "auto"),
+      autoScale: o.autoScale !== false,
+      iconSize: Math.min(2, Math.max(0.5, Number(o.iconSize) || 1)),
     };
   } catch { return DEFAULT_PREFS; }
 }
