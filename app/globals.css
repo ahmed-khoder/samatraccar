@@ -118,7 +118,12 @@ select.input { appearance: auto; }
 .leaflet-control-attribution a { color: var(--accent) !important; }
 .leaflet-tooltip { background: var(--panel-solid); color: var(--fg); border-color: var(--line); }
 
-.veh { position: relative; width: 44px; height: 44px; color: var(--c); }
+/* .vw = fixed 44px anchor box; .veh inside is scaled by the map zoom (--s) so icons never swamp the map; the label stays unscaled and readable */
+.vw { position: relative; width: 44px; height: 44px; }
+.veh { position: absolute; inset: 0; color: var(--c); transform: scale(var(--sb, 1)); transform-origin: 50% 50%; transition: transform .25s ease-out; }
+.veh.top { transform: scale(var(--s, 1)); }
+.veh.idle .shape, .veh.idle .badge { animation: idle 2.4s ease-in-out infinite; }
+@keyframes idle { 50% { opacity: .55; } }
 .veh .heading { position: absolute; inset: 0; transition: none; }
 .veh .heading i {
   position: absolute; top: -3px; left: 50%; margin-left: -6px; width: 0; height: 0;
@@ -130,13 +135,13 @@ select.input { appearance: auto; }
   background: #0b1220; border: 2.5px solid var(--c); box-shadow: 0 4px 14px rgba(0,0,0,.6), 0 0 0 3px rgba(11,18,32,.55);
 }
 .veh.sel .badge { box-shadow: 0 0 0 4px rgba(255,255,255,.35), 0 4px 16px rgba(0,0,0,.65); }
-.veh.moving .badge::after {
+.veh.moving .badge::after, .veh.over .badge::after {
   content: ""; position: absolute; inset: -5px; border-radius: 50%; border: 2px solid var(--c); animation: pulse 1.8s infinite;
 }
 .veh.offline, .veh.unknown { opacity: .7; }
 .veh.offline:not(.top) .heading, .veh.unknown:not(.top) .heading { display: none; }
-.veh .lbl {
-  position: absolute; top: 46px; left: 50%; transform: translateX(-50%); white-space: nowrap;
+.vw .lbl {
+  position: absolute; top: calc(22px + var(--half, 22px) * var(--k, 1) + 4px); pointer-events: none; left: 50%; transform: translateX(-50%); white-space: nowrap;
   font-size: 10.5px; padding: 1px 7px; border-radius: 7px; background: rgba(7,11,20,.88); color: #fff; border: 1px solid rgba(255,255,255,.18);
 }
 @keyframes pulse { from { transform: scale(1); opacity: .8; } to { transform: scale(1.7); opacity: 0; } }
@@ -151,13 +156,11 @@ html[lang="en"] body { font-family: var(--font-sans); }
 .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #34d399; animation: shimmer 1.6s infinite; box-shadow: 0 0 8px #34d399; }
 @media (prefers-reduced-motion: reduce) { * { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
 
-.tiles-dark { filter: invert(1) hue-rotate(180deg) brightness(.92) contrast(.88) saturate(.55); }
-.tiles-soft { filter: saturate(.85) brightness(.98); }
 .recharts-wrapper, .recharts-legend-wrapper { direction: ltr; }
 
 .veh.top .shape { position: absolute; left: 50%; top: 50%; filter: drop-shadow(0 3px 5px rgba(0,0,0,.6)); }
 .veh.top .ring { position: absolute; inset: 0; border-radius: 50%; border: 2px solid rgba(255,255,255,.55); }
-.veh.top.moving .shape { filter: drop-shadow(0 0 6px var(--c)) drop-shadow(0 3px 5px rgba(0,0,0,.6)); }
+.veh.top.moving .shape, .veh.top.over .shape { filter: drop-shadow(0 0 6px var(--c)) drop-shadow(0 3px 5px rgba(0,0,0,.6)); }
 
 
 
@@ -181,4 +184,39 @@ html[lang="en"] body { font-family: var(--font-sans); }
   .glass { backdrop-filter: none !important; box-shadow: none !important; break-inside: avoid; }
   .rise { animation: none !important; }
   @page { margin: 12mm; }
+}
+
+/* vehicle card anchored on the map: pops in from the arrow, arrow follows the vehicle */
+.pop-wrap { animation: popin .24s cubic-bezier(.2,.9,.3,1.15) both; transform-origin: var(--ax, 50%) 100%; }
+[data-below="1"] .pop-wrap { transform-origin: var(--ax, 50%) 0; }
+@keyframes popin { from { opacity: 0; transform: translateY(8px) scale(.92); } to { opacity: 1; transform: none; } }
+.pop-arrow {
+  position: absolute; left: var(--ax, 50%); bottom: -6px; width: 12px; height: 12px; margin-left: -6px; transform: rotate(45deg);
+  background: inherit; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--panel-solid);
+}
+[data-below="1"] .pop-arrow { bottom: auto; top: -6px; transform: rotate(225deg); }
+
+/* ---------- phones ---------- */
+html { -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
+body { overscroll-behavior: none; }
+@media (max-width: 767px) {
+  .input, select.input { font-size: 16px; } /* iOS zooms the page when a smaller field is focused */
+  .btn { min-height: 36px; }
+  /* keep the zoom buttons above the vehicle-list handle, and the (long) attribution small */
+  .leaflet-bottom { margin-bottom: 38px; }
+  .leaflet-control-attribution { font-size: 9px; max-width: 78vw; line-height: 1.25; }
+  .leaflet-control-zoom a { width: 38px !important; height: 38px !important; line-height: 38px !important; }
+}
+
+@keyframes sheet-up { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+.sheet-up { animation: sheet-up .28s cubic-bezier(.2,.9,.3,1) both; }
+.fade-in { animation: fade-in .2s ease both; }
+@media (max-width: 767px) {
+  .btn { border-radius: 14px; }
+  .glass { border-radius: 18px; }
+  /* chips and tab strips scroll sideways without a visible bar */
+  .overflow-x-auto { scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .overflow-x-auto::-webkit-scrollbar { display: none; }
+  .leaflet-bottom { margin-bottom: 44px; }
 }

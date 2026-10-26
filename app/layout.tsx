@@ -11,11 +11,11 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 const cairo = Cairo({ variable: "--font-ar", subsets: ["arabic", "latin"] });
 
 export const metadata: Metadata = {
-  title: "Tracar — Fleet Intelligence",
+  title: "SAMA Logistics — Fleet Tracking",
   description: "Live vehicle tracking, trip replay and fleet analytics powered by Traccar",
   manifest: "/manifest.webmanifest",
 };
-export const viewport: Viewport = { themeColor: [{ media: "(prefers-color-scheme: dark)", color: "#070b14" }, { media: "(prefers-color-scheme: light)", color: "#f3f6fb" }] };
+export const viewport: Viewport = { width: "device-width", initialScale: 1, viewportFit: "cover", themeColor: [{ media: "(prefers-color-scheme: dark)", color: "#070b14" }, { media: "(prefers-color-scheme: light)", color: "#f3f6fb" }] };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const jar = await cookies();

@@ -1,5 +1,6 @@
 import { addAgg, avgSpeed, driverScore, emptyAgg, type AnalyticsResponse, type DayAgg } from "./agg";
 import type { Key } from "./dict";
+import { addDays, dayKey, startOfDay } from "./tz";
 
 export interface VRow {
   id: number; name: string; a: DayAgg; days: Record<string, DayAgg>;
@@ -73,15 +74,11 @@ export function insights(rows: VRow[], perDay: [string, DayAgg][], fmt: (n: numb
   return out;
 }
 
-/** All local days (yyyy-mm-dd) covered by an ISO window. */
+/** All Cairo days (yyyy-mm-dd) covered by an ISO window. */
 export function dayKeys(w: { from: string; to: string }) {
   const out: string[] = [];
-  const d = new Date(w.from); d.setHours(0, 0, 0, 0);
   const end = new Date(w.to).getTime();
-  while (d.getTime() < end && out.length < 100) {
-    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
-    d.setDate(d.getDate() + 1);
-  }
+  for (let d = startOfDay(new Date(w.from).getTime()); d < end && out.length < 100; d = addDays(d, 1)) out.push(dayKey(d));
   return out;
 }
 

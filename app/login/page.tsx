@@ -1,7 +1,8 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Radar, Loader2, Languages } from "lucide-react";
+import Brand from "@/components/Brand";
+import { Loader2, Languages } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 
 export default function Login() {
@@ -25,17 +26,13 @@ export default function Login() {
   }
 
   return (
-    <main className="min-h-screen grid place-items-center px-4 relative">
+    <main className="min-h-dvh grid place-items-center px-4 relative">
       <button onClick={() => setLang(lang === "ar" ? "en" : "ar")} className="btn glass absolute top-4 end-4"><Languages size={15} />{lang === "ar" ? "English" : "العربية"}</button>
       <form onSubmit={submit} className="glass w-full max-w-sm p-8 space-y-5 rise">
-        <div className="flex items-center gap-3">
-          <div className="size-11 rounded-xl grid place-items-center bg-gradient-to-br from-accent to-accent2">
-            <Radar className="on-accent" />
-          </div>
-          <div>
-            <h1 className="text-xl font-semibold grad-text">Tracar</h1>
-            <p className="text-xs text-muted">{t("login.subtitle")}</p>
-          </div>
+        <div className="flex flex-col items-center gap-2 text-center">
+          <Brand variant="square" height={96} />
+          <h1 className="sr-only">SAMA Logistics</h1>
+          <p className="text-xs text-muted">{t("login.subtitle")}</p>
         </div>
         <div className="space-y-3">
           <input className="input" dir="ltr" type="email" placeholder={t("login.email")} autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} />

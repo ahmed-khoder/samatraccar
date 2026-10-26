@@ -4,6 +4,8 @@ import useSWR, { mutate, SWRConfiguration } from "swr";
 import type { Device, Position, Geofence, Group } from "./types";
 import { usePrefs } from "./prefs";
 import { type AnalyticsResponse, addAgg, emptyAgg, type DayAgg } from "./agg";
+import { mergePolled, mergePushed } from "./live-merge";
+import { addDays, startOfDay } from "./tz";
 
 export const fetcher = async (url: string) => {
   const r = await fetch(url);
@@ -15,7 +17,32 @@ export const fetcher = async (url: string) => {
 const api = (p: string) => `/api/t/${p}`;
 
 export const useDevices = () => useSWR<Device[]>(api("devices"), fetcher, { refreshInterval: 10000 });
-export const usePositions = () => useSWR<Position[]>(api("positions"), fetcher, { refreshInterval: 3000 });
+// Live positions: /api/live (Traccar latest, corrected for trackers stuck on a future-dated fix) polled every 3 s,
+// plus Traccar's own push relayed by /api/stream so a new fix shows up as soon as the server has it.
+const LIVE = "/api/live";
+let liveNow: Position[] | undefined; // what the map shows, shared by both sources
+
+let stream: EventSource | null = null, streamUsers = 0;
+/** One EventSource per tab, however many components use live positions. */
+function useLiveStream() {
+  useEffect(() => {
+    if (typeof EventSource === "undefined") return;
+    if (streamUsers++ === 0) {
+      stream = new EventSource("/api/stream");
+      stream.addEventListener("positions", (e) => {
+        try { mutate(LIVE, (cur?: Position[]) => (liveNow = mergePushed(cur, JSON.parse((e as MessageEvent).data))), { revalidate: false }); } catch {}
+      });
+    }
+    return () => { if (--streamUsers === 0) { stream?.close(); stream = null; } };
+  }, []);
+}
+
+export function usePositions() {
+  useLiveStream();
+  // a poll that started before a pushed update must not roll the map back to the older position
+  return useSWR<Position[]>(LIVE, async (u: string) => (liveNow = mergePolled(liveNow, await fetcher(u))), { refreshInterval: 3000 });
+}
+
 export const useGeofences = () => useSWR<Geofence[]>(api("geofences"), fetcher);
 export const useGroups = () => useSWR<Group[]>(api("groups"), fetcher);
 
@@ -48,8 +75,7 @@ export function deriveAnalytics(data?: AnalyticsResponse) {
 export function useAnalytics(range: { from: string; to: string }, ids?: number[], limitArg?: number, refresh = 60000) {
   const { prefs } = usePrefs();
   const limit = limitArg ?? prefs.limit;
-  const offset = new Date().getTimezoneOffset();
-  const q = `/api/analytics?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}&offset=${offset}&limit=${limit}${ids ? `&devices=${ids.join(",")}` : ""}`;
+  const q = `/api/analytics?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}&limit=${limit}${ids ? `&devices=${ids.join(",")}` : ""}`;
   const swr = useSWR<AnalyticsResponse>(q, fetcher, { revalidateOnFocus: false, refreshInterval: refresh, keepPreviousData: true });
   const derived = useMemo(() => deriveAnalytics(swr.data), [swr.data]);
   return { ...swr, ...derived };
@@ -81,21 +107,20 @@ export function useAnalyticsRange(range: { from: string; to: string } | null, id
   useEffect(() => {
     if (!range) return;
     const id = ++run.current;
-    const offset = new Date().getTimezoneOffset();
-    const start = new Date(range.from); start.setHours(0, 0, 0, 0);
-    const end = new Date(range.to);
+    // 7-day chunks starting at Cairo midnights (the server buckets by Cairo day as well)
+    const end = new Date(range.to).getTime();
     const chunks: { from: string; to: string }[] = [];
-    for (let d = start.getTime(), n = 0; d < end.getTime() && n < MAX_DAYS; n += 7) {
-      const s = new Date(d); const e = new Date(s); e.setDate(e.getDate() + 7);
-      chunks.push({ from: s.toISOString(), to: new Date(Math.min(e.getTime(), end.getTime())).toISOString() });
-      d = e.getTime();
+    for (let d = startOfDay(new Date(range.from).getTime()), n = 0; d < end && n < MAX_DAYS; n += 7) {
+      const e = addDays(d, 7);
+      chunks.push({ from: new Date(d).toISOString(), to: new Date(Math.min(e, end)).toISOString() });
+      d = e;
     }
     setProgress({ done: 0, total: chunks.length }); setError(false);
     const merged: AnalyticsResponse = { devices: {}, limit, from: range.from, to: range.to };
     let done = 0, next = 0;
     const quiet = tick > 0; // background refresh: swap data in once, no flicker
     const fetchChunk = async (c: { from: string; to: string }) => {
-      const url = `/api/analytics?from=${encodeURIComponent(c.from)}&to=${encodeURIComponent(c.to)}&offset=${offset}&limit=${limit}${idsKey ? `&devices=${idsKey}` : ""}`;
+      const url = `/api/analytics?from=${encodeURIComponent(c.from)}&to=${encodeURIComponent(c.to)}&limit=${limit}${idsKey ? `&devices=${idsKey}` : ""}`;
       const hit = chunkCache.get(url);
       const live = new Date(c.to).getTime() > Date.now() - 36e5;
       if (hit && Date.now() - hit.at < (live ? 30000 : 3600000)) return hit.data;

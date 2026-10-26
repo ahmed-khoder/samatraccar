@@ -8,9 +8,10 @@ import { Car, Route, Gauge, Clock, Navigation, BatteryWarning, Bell, Activity, T
 import { useAnalyticsRange, useDevices, usePositions, useReport } from "@/lib/api";
 import { useRangeSel } from "@/lib/hooks";
 import { avgSpeed, driverScore, HIST_BINS } from "@/lib/agg";
-import { deviceState, fmtDateTime, fmtDuration, fmtNum, mToKm, STATE_COLOR } from "@/lib/format";
+import { deviceState, fmtDateTime, fmtDuration, fmtNum, mToKm } from "@/lib/format";
 import type { TEvent } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
+import { usePrefs } from "@/lib/prefs";
 import { evLabel } from "@/lib/events";
 import { Card, chartTip, Empty, Kpi, RangeBar, Skeleton } from "@/components/ui";
 import type { Key } from "@/lib/dict";
@@ -21,6 +22,7 @@ const grid = <CartesianGrid stroke="rgba(148,163,184,.22)" vertical={false} />;
 
 export default function Dashboard() {
   const { t } = useI18n();
+  const { prefs } = usePrefs();
   const { range, setRange, custom, setCustom, win: r } = useRangeSel("7d");
   const { data: devices } = useDevices();
   const { data: positions } = usePositions();
@@ -62,9 +64,9 @@ export default function Dashboard() {
     .sort((a, b) => (a.attributes.batteryLevel ?? 0) - (b.attributes.batteryLevel ?? 0)).slice(0, 5), [positions]);
 
   const donut = [
-    { name: t("state.moving"), v: live.moving, c: STATE_COLOR.moving },
-    { name: t("state.stopped"), v: live.stopped, c: STATE_COLOR.stopped },
-    { name: t("state.offline"), v: live.offline, c: STATE_COLOR.offline },
+    { name: t("state.moving"), v: live.moving, c: prefs.cMoving },
+    { name: t("state.stopped"), v: live.stopped, c: prefs.cStopped },
+    { name: t("state.offline"), v: live.offline, c: prefs.cOffline },
   ];
   const idlePct = f.movingMs + f.idleMs ? (f.idleMs / (f.movingMs + f.idleMs)) * 100 : 0;
   const scores = perVehicle.map((x) => driverScore(x.a));
