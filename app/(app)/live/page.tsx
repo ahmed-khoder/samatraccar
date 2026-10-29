@@ -207,7 +207,7 @@ function Detail({ row: { d, p, st, vs }, onClose }: { row: Row; onClose: () => v
   const fix = p ? fixAt(p) : null;
   const fixText = fix ? timeDate(Date.parse(fix)) : null; // null too when the tracker sent an unreadable time
   const kmh = st === "nofix" ? 0 : knToKmh(p?.speed);
-  const dur = (ms: number | null) => (ms == null ? null : <span className="tabular-nums">({fmtDurationFull(now - ms)})</span>);
+  const dur = (ms: number | null) => (ms == null ? null : <span className="tabular-nums" title={t("card.since")}>({fmtDurationFull(now - ms)})</span>);
   return (
     <div className="vcard">
       <button onClick={() => setMore((v) => !v)} className="vcard-toggle" aria-label={t("card.more")} aria-expanded={more}><ChevronLeft size={22} className={more ? "-rotate-90" : ""} /></button>
