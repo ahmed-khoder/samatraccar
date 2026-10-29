@@ -55,3 +55,11 @@ test("card time is hh:mm:ss dd-mm-yyyy in Cairo time", () => {
   assert.equal(timeDate(Date.parse("2026-10-29T00:52:30Z")), "03:52:30 29-10-2026"); // summer time still on (ends the last Thursday of October at midnight)
   assert.equal(timeDate(Date.parse("2026-07-01T21:05:09Z")), "00:05:09 02-07-2026"); // summer, UTC+3, next Cairo day
 });
+
+test("an unreadable time gives null instead of throwing (the card shows 'time unknown')", () => {
+  assert.equal(timeDate(Date.parse("bad")), null);
+  assert.equal(timeDate(NaN), null);
+  assert.equal(timeDate(Infinity), null);
+  assert.equal(timeDate(Date.parse("2026-10-29T20:59:59Z")), "23:59:59 29-10-2026"); // last second before summer time ends
+  assert.equal(timeDate(Date.parse("2026-10-29T21:00:00Z")), "23:00:00 29-10-2026"); // clocks go back: 23:00 again
+});

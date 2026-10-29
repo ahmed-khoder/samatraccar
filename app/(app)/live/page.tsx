@@ -205,6 +205,7 @@ function Detail({ row: { d, p, st, vs }, onClose }: { row: Row; onClose: () => v
   const now = useNow(1000);
   const skew = p ? (Date.parse(p.fixTime) - Date.parse(p.serverTime)) / 36e5 : 0;
   const fix = p ? fixAt(p) : null;
+  const fixText = fix ? timeDate(Date.parse(fix)) : null; // null too when the tracker sent an unreadable time
   const kmh = st === "nofix" ? 0 : knToKmh(p?.speed);
   const dur = (ms: number | null) => (ms == null ? null : <span className="tabular-nums">({fmtDurationFull(now - ms)})</span>);
   return (
@@ -214,10 +215,10 @@ function Detail({ row: { d, p, st, vs }, onClose }: { row: Row; onClose: () => v
         <div>{d.name}{d.model ? `(${d.model})` : ""}</div>
         {p ? (
           <>
-            {fix ? <div>{t("tbl.time")}: <span className="tabular-nums" dir="ltr">{timeDate(Date.parse(fix))}</span></div>
+            {fixText ? <div>{t("tbl.time")}: <span className="tabular-nums" dir="ltr">{fixText}</span></div>
               : <div className="text-xs text-amber-300">{t("live.timeunknown")}</div>}
             {/* the tracker still reports, but without a new GPS fix: say so instead of passing the old location off as current */}
-            {fix && Date.parse(p.serverTime) - Date.parse(fix) > 2 * 60000 && <div className="text-xs text-amber-300">{t("live.lastmsg")}: {timeAgo(p.serverTime)} · {t("live.nonewfix")}</div>}
+            {fix && fixText && Date.parse(p.serverTime) - Date.parse(fix) > 2 * 60000 && <div className="text-xs text-amber-300">{t("live.lastmsg")}: {timeAgo(p.serverTime)} · {t("live.nonewfix")}</div>}
             <div>{t("stat.state")}: {st === "moving" ? t("card.moving") : st === "stopped" ? t("card.stopped") : t(sk(vs))}{dur(since.motion)}</div>
             {ign !== undefined && <div>{t("tbl.engine")}: {t(ign ? "card.engon" : "card.engoff")}{dur(since.ign)}</div>}
             {typeof a.door === "boolean" && <div>{t("stat.door")}: {t(a.door ? "stat.open" : "stat.closed")}</div>}

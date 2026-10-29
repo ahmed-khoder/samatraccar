@@ -41,5 +41,9 @@ const p2 = (n: number) => String(n).padStart(2, "0");
 export const dayKey = (ms: number) => { const w = wall(ms); return `${w.y}-${p2(w.m)}-${p2(w.d)}`; };
 /** yyyy-mm-dd hh:mm:ss in Cairo time. */
 export const stamp = (ms: number) => { const w = wall(ms); return `${w.y}-${p2(w.m)}-${p2(w.d)} ${p2(w.h)}:${p2(w.mi)}:${p2(w.s)}`; };
-/** hh:mm:ss dd-mm-yyyy in Cairo time (the vehicle card). */
-export const timeDate = (ms: number) => { const w = wall(ms); return `${p2(w.h)}:${p2(w.mi)}:${p2(w.s)} ${p2(w.d)}-${p2(w.m)}-${w.y}`; };
+/** hh:mm:ss dd-mm-yyyy in Cairo time (the vehicle card), or null for an invalid instant (Intl would throw on it). */
+export const timeDate = (ms: number) => {
+  if (!Number.isFinite(ms)) return null;
+  const w = wall(ms);
+  return `${p2(w.h)}:${p2(w.mi)}:${p2(w.s)} ${p2(w.d)}-${p2(w.m)}-${w.y}`;
+};
