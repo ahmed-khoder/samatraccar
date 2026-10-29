@@ -33,21 +33,25 @@ export function fmtDurationFull(ms: number) {
   return parts.slice(i < 0 ? 3 : i).map(([n, a, e]) => `${n}${ar ? a : e}`).join(ar ? "" : " ");
 }
 
+/** An ISO time that Date can read; tracker data can carry unreadable strings, which must show as "—", not "Invalid Date" / "NaN". */
+const readable = (iso?: string | null): iso is string => !!iso && Number.isFinite(Date.parse(iso));
+
 export function fmtDateTime(iso?: string | null) {
-  if (!iso) return "—";
+  if (!readable(iso)) return "—";
   return new Date(iso).toLocaleString(LOCALE, {
     day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: TZ,
   });
 }
 
 export function fmtTime(iso?: string | null) {
-  if (!iso) return "—";
+  if (!readable(iso)) return "—";
   return new Date(iso).toLocaleTimeString(LOCALE, { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: TZ });
 }
 
 export function timeAgo(iso?: string | null) {
   const ar = LOCALE.startsWith("ar");
   if (!iso) return ar ? "أبدًا" : "never";
+  if (!readable(iso)) return "—";
   const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
   const f = (n: number, a: string, e: string) => (ar ? `منذ ${n} ${a}` : `${n}${e} ago`);
   if (s < 60) return ar ? "الآن" : "just now";

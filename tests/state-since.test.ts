@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { SINCE_GAP, SINCE_TTL, sinceStep, stateSince, type Since } from "../lib/state-since.ts";
-import { fmtDurationFull, setLocale } from "../lib/format.ts";
+import { fmtDateTime, fmtDurationFull, fmtTime, setLocale, timeAgo } from "../lib/format.ts";
 import { timeDate } from "../lib/tz.ts";
 
 const ev = (type: string, iso: string) => ({ type, eventTime: iso });
@@ -104,4 +104,16 @@ test("an unreadable time gives null instead of throwing (the card shows 'time un
   assert.equal(timeDate(Infinity), null);
   assert.equal(timeDate(Date.parse("2026-10-29T20:59:59Z")), "23:59:59 29-10-2026"); // last second before summer time ends
   assert.equal(timeDate(Date.parse("2026-10-29T21:00:00Z")), "23:00:00 29-10-2026"); // clocks go back: 23:00 again
+});
+
+test("unreadable times show as a dash, never 'Invalid Date' or 'NaN'", () => {
+  setLocale("ar-EG-u-nu-latn");
+  for (const v of ["garbage", "2026-13-45T99:00:00Z"]) {
+    assert.equal(fmtDateTime(v), "—");
+    assert.equal(fmtTime(v), "—");
+    assert.equal(timeAgo(v), "—");
+  }
+  assert.equal(timeAgo(null), "أبدًا"); // a missing time still reads "never"
+  assert.equal(fmtTime("2026-10-29T00:00:00Z"), "03:00"); // valid input unchanged (Cairo, summer time)
+  setLocale("en-GB");
 });
