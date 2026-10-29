@@ -31,8 +31,12 @@ const hex = (v: unknown, d: string) => (typeof v === "string" && /^#[0-9a-f]{6}$
 
 export function parsePrefs(raw?: string | null): Prefs {
   if (!raw) return DEFAULT_PREFS;
+  try { return normalizePrefs(JSON.parse(decodeURIComponent(raw))); } catch { return DEFAULT_PREFS; }
+}
+
+/** Any object (cookie, server file, request body) -> a complete, valid Prefs; unknown or invalid fields fall back to the defaults. */
+export function normalizePrefs(o: Record<string, unknown>): Prefs {
   try {
-    const o = JSON.parse(decodeURIComponent(raw));
     const pick = <T extends string>(v: unknown, ok: readonly T[], d: T) => (ok.includes(v as T) ? (v as T) : d);
     return {
       theme: pick(o.theme, ["dark", "light", "system"], "dark"),
@@ -55,3 +59,11 @@ export function parsePrefs(raw?: string | null): Prefs {
   } catch { return DEFAULT_PREFS; }
 }
 
+
+
+/** Look-and-feel of the map and vehicles: kept on the server per user, so every device shows the same. Layout (nav, list, tools) stays per device. */
+export const SYNCED_KEYS = ["theme", "limit", "trails", "labels", "tile", "geo", "colorMode", "cMoving", "cIdle", "cStopped", "cOver", "cOffline", "autoScale", "iconSize"] as const satisfies readonly (keyof Prefs)[];
+export type SyncedPrefs = Pick<Prefs, (typeof SYNCED_KEYS)[number]>;
+
+export const pickSynced = (p: Prefs): SyncedPrefs => Object.fromEntries(SYNCED_KEYS.map((k) => [k, p[k]])) as SyncedPrefs;
+export const sameSynced = (a: Prefs, b: Prefs) => SYNCED_KEYS.every((k) => a[k] === b[k]);
