@@ -6,7 +6,7 @@ import { usePrefs } from "./prefs";
 import { type AnalyticsResponse, addAgg, emptyAgg, type DayAgg } from "./agg";
 import { mergePolled, mergePushed } from "./live-merge";
 import { addDays, startOfDay } from "./tz";
-import { STATE_EVENTS, hasPair, stateSince } from "./state-since";
+import { SINCE_HOURS, SINCE_TTL, STATE_EVENTS, sinceStep, stateSince, type Since } from "./state-since";
 
 export const fetcher = async (url: string) => {
   const r = await fetch(url);
@@ -57,23 +57,18 @@ export function useReport<T>(kind: string, range: { from: string; to: string } |
   return useSWR<T>(key, fetcher, { revalidateOnFocus: false, ...cfg });
 }
 
-// Engine / motion "since" for the selected vehicle only. One small events query when its card opens: the last 6 h, widened once to 48 h
-// only when that holds no transition. Cached per vehicle and asked again only when its state changes (at most once a minute) or after
-// 10 min with the card open: never on map moves, zoom or position updates, never for the whole fleet.
-type Since = { sig: string; at: number; failed: boolean; ign: number | null; motion: number | null };
+// Engine / motion "since" for the selected vehicle only. One small events query when its card opens (the last 48 h of its four
+// transition event types), cached per vehicle and asked again only when its state changes (at most once a minute) or after
+// 10 min with the card open: never on map moves, zoom or position updates, never for the whole fleet. A failed query is not retried
+// by itself: the card shows no durations, and the next try waits at least a minute.
 const sinceCache = new Map<number, Since>();
 const sinceBusy = new Map<number, Promise<unknown>>();
-const SINCE_TTL = 10 * 60000, SINCE_GAP = 60000;
 
 async function loadSince(id: number, ign: boolean | undefined, motion: boolean | undefined, sig: string): Promise<Since> {
-  const get = async (hours: number): Promise<TEvent[]> => {
-    const to = Date.now() + 60000;
-    const r = await fetch(`${api("reports/events")}?deviceId=${id}&from=${new Date(to - hours * 36e5).toISOString()}&to=${new Date(to).toISOString()}${STATE_EVENTS.map((t) => `&type=${t}`).join("")}`);
-    if (!r.ok) throw new Error(String(r.status));
-    return r.json();
-  };
-  let ev = await get(6);
-  if ((typeof ign === "boolean" && !hasPair(ev, "ignition")) || (typeof motion === "boolean" && !hasPair(ev, "motion"))) ev = await get(48);
+  const to = Date.now() + 60000;
+  const r = await fetch(`${api("reports/events")}?deviceId=${id}&from=${new Date(to - SINCE_HOURS * 36e5).toISOString()}&to=${new Date(to).toISOString()}${STATE_EVENTS.map((t) => `&type=${t}`).join("")}`);
+  if (!r.ok) throw new Error(String(r.status));
+  const ev: TEvent[] = await r.json();
   return { sig, at: Date.now(), failed: false, ign: stateSince(ev, "ignition", ign), motion: stateSince(ev, "motion", motion) };
 }
 
@@ -86,11 +81,10 @@ export function useStateSince(id: number, ign: boolean | undefined, motion: bool
     let off = false, timer: ReturnType<typeof setTimeout> | undefined;
     const check = () => {
       if (off) return;
-      const c = sinceCache.get(id), age = c ? Date.now() - c.at : Infinity;
-      if (c && c.sig === sig && age < (c.failed ? SINCE_GAP : SINCE_TTL)) return;
-      const busy = sinceBusy.get(id);
-      if (busy) { busy.finally(check); return; } // one request per vehicle at a time
-      if (age < SINCE_GAP) { clearTimeout(timer); timer = setTimeout(check, SINCE_GAP - age); return; }
+      const busy = sinceBusy.get(id), step = sinceStep(sinceCache.get(id), sig, Date.now(), !!busy);
+      if (step.do === "keep") return;
+      if (step.do === "join") { busy!.finally(check); return; } // one request per vehicle at a time
+      if (step.do === "wait") { clearTimeout(timer); timer = setTimeout(check, step.ms); return; }
       const job = loadSince(id, ign, motion, sig)
         .catch((): Since => ({ sig, at: Date.now(), failed: true, ign: null, motion: null }))
         .then((r) => { sinceCache.set(id, r); sinceBusy.delete(id); if (!off) bump((n) => n + 1); });
