@@ -31,7 +31,15 @@ function guardGlLayer<T extends object>(layer: T): T {
   const l = layer as unknown as Record<string, (...a: unknown[]) => unknown> & { _map?: unknown };
   for (const k of GL_HANDLERS) {
     const orig = l[k];
-    if (typeof orig === "function") l[k] = function (this: typeof l, ...a: unknown[]) { return this._map ? orig.apply(this, a) : undefined; };
+    if (typeof orig !== "function") continue;
+    l[k] = function (this: typeof l, ...a: unknown[]) {
+      if (!this._map) return undefined;
+      if (k !== "_transitionEnd") return orig.apply(this, a);
+      // _transitionEnd schedules its real work in a requestAnimationFrame: re-check the map there (it may be removed by then)
+      const raf = L.Util.requestAnimFrame;
+      L.Util.requestAnimFrame = ((fn: () => void, ctx?: unknown, immediate?: boolean) => raf(() => { if ((ctx as typeof l | undefined)?._map) fn.call(ctx); }, undefined, immediate)) as typeof raf;
+      try { return orig.apply(this, a); } finally { L.Util.requestAnimFrame = raf; }
+    };
   }
   return layer;
 }
