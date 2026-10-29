@@ -24,6 +24,15 @@ export function fmtDuration(ms: number) {
   return `${s}${U.s}`;
 }
 
+/** Every unit down to the second, from the largest non-zero one: 10ساعة11دقيقة21ثانية / 10h 11m 21s (the vehicle card). */
+export function fmtDurationFull(ms: number) {
+  const s = Math.floor(Math.max(0, ms) / 1000);
+  const ar = LOCALE.startsWith("ar");
+  const parts = [[Math.floor(s / 86400), "يوم", "d"], [Math.floor((s % 86400) / 3600), "ساعة", "h"], [Math.floor((s % 3600) / 60), "دقيقة", "m"], [s % 60, "ثانية", "s"]] as const;
+  const i = parts.findIndex(([n]) => n > 0);
+  return parts.slice(i < 0 ? 3 : i).map(([n, a, e]) => `${n}${ar ? a : e}`).join(ar ? "" : " ");
+}
+
 export function fmtDateTime(iso?: string | null) {
   if (!iso) return "—";
   return new Date(iso).toLocaleString(LOCALE, {

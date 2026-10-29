@@ -1,11 +1,12 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { mutate, SWRConfiguration } from "swr";
-import type { Device, Position, Geofence, Group } from "./types";
+import type { Device, Position, Geofence, Group, TEvent } from "./types";
 import { usePrefs } from "./prefs";
 import { type AnalyticsResponse, addAgg, emptyAgg, type DayAgg } from "./agg";
 import { mergePolled, mergePushed } from "./live-merge";
 import { addDays, startOfDay } from "./tz";
+import { STATE_EVENTS, hasPair, stateSince } from "./state-since";
 
 export const fetcher = async (url: string) => {
   const r = await fetch(url);
@@ -54,6 +55,53 @@ export function useReport<T>(kind: string, range: { from: string; to: string } |
     ? `${api("reports/" + kind)}?${list.map((i) => `deviceId=${i}`).join("&")}&from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}${extra}`
     : null;
   return useSWR<T>(key, fetcher, { revalidateOnFocus: false, ...cfg });
+}
+
+// Engine / motion "since" for the selected vehicle only. One small events query when its card opens: the last 6 h, widened once to 48 h
+// only when that holds no transition. Cached per vehicle and asked again only when its state changes (at most once a minute) or after
+// 10 min with the card open: never on map moves, zoom or position updates, never for the whole fleet.
+type Since = { sig: string; at: number; failed: boolean; ign: number | null; motion: number | null };
+const sinceCache = new Map<number, Since>();
+const sinceBusy = new Map<number, Promise<unknown>>();
+const SINCE_TTL = 10 * 60000, SINCE_GAP = 60000;
+
+async function loadSince(id: number, ign: boolean | undefined, motion: boolean | undefined, sig: string): Promise<Since> {
+  const get = async (hours: number): Promise<TEvent[]> => {
+    const to = Date.now() + 60000;
+    const r = await fetch(`${api("reports/events")}?deviceId=${id}&from=${new Date(to - hours * 36e5).toISOString()}&to=${new Date(to).toISOString()}${STATE_EVENTS.map((t) => `&type=${t}`).join("")}`);
+    if (!r.ok) throw new Error(String(r.status));
+    return r.json();
+  };
+  let ev = await get(6);
+  if ((typeof ign === "boolean" && !hasPair(ev, "ignition")) || (typeof motion === "boolean" && !hasPair(ev, "motion"))) ev = await get(48);
+  return { sig, at: Date.now(), failed: false, ign: stateSince(ev, "ignition", ign), motion: stateSince(ev, "motion", motion) };
+}
+
+/** When the current engine / motion state began (ms), or null when it can't be vouched for. Pass undefined for a state that doesn't apply. */
+export function useStateSince(id: number, ign: boolean | undefined, motion: boolean | undefined, enabled: boolean) {
+  const sig = `${ign}|${motion}`;
+  const [, bump] = useState(0);
+  useEffect(() => {
+    if (!enabled) return;
+    let off = false, timer: ReturnType<typeof setTimeout> | undefined;
+    const check = () => {
+      if (off) return;
+      const c = sinceCache.get(id), age = c ? Date.now() - c.at : Infinity;
+      if (c && c.sig === sig && age < (c.failed ? SINCE_GAP : SINCE_TTL)) return;
+      const busy = sinceBusy.get(id);
+      if (busy) { busy.finally(check); return; } // one request per vehicle at a time
+      if (age < SINCE_GAP) { clearTimeout(timer); timer = setTimeout(check, SINCE_GAP - age); return; }
+      const job = loadSince(id, ign, motion, sig)
+        .catch((): Since => ({ sig, at: Date.now(), failed: true, ign: null, motion: null }))
+        .then((r) => { sinceCache.set(id, r); sinceBusy.delete(id); if (!off) bump((n) => n + 1); });
+      sinceBusy.set(id, job);
+    };
+    check();
+    const every = setInterval(check, SINCE_TTL);
+    return () => { off = true; clearTimeout(timer); clearInterval(every); };
+  }, [id, sig, enabled]); // eslint-disable-line react-hooks/exhaustive-deps -- sig is ign + motion
+  const c = sinceCache.get(id);
+  return enabled && c && c.sig === sig ? { ign: c.ign, motion: c.motion } : { ign: null, motion: null };
 }
 
 export function deriveAnalytics(data?: AnalyticsResponse) {

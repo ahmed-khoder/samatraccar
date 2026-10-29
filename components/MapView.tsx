@@ -239,7 +239,7 @@ export default function MapView({ devices = [], positions = [], selectedId, onSe
       if (pe && sa) {
         // keep the card glued to the vehicle: above it, flipped below when there is no room, clamped to the map edges
         const pt = m.latLngToContainerPoint(sa.cur), size = m.getSize(), w = pe.offsetWidth, h = pe.offsetHeight;
-        const gap = sa.half * (sa.top ? scaleNow.current.top : scaleNow.current.badge) + 12;
+        const gap = sa.half * (sa.top ? scaleNow.current.top : scaleNow.current.badge) + 6;
         const above = pt.y - gap - 8, under = size.y - pt.y - gap - 8;
         const below = h > above && under > above; // more room under the vehicle than over it
         const room = Math.max(120, below ? under : above);
@@ -315,7 +315,7 @@ export default function MapView({ devices = [], positions = [], selectedId, onSe
       const selected = d.id === selectedId;
       const half = d.category && TOP_VIEW[d.category] ? TOP_VIEW[d.category].h / 2 : 22;
       const sig = [d.category, color, vs, selected, d.name, labels].join("|");
-      const labelText = `${d.name}${state === "moving" ? ` · ${kmh}` : ""}`;
+      const labelText = d.name;
       let a = anims.current.get(d.id);
       if (!a) {
         const marker = L.marker(ll, {

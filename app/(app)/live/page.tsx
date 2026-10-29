@@ -1,16 +1,16 @@
 "use client";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { usePrefs } from "@/lib/prefs";
 import {
   Search, Battery, Gauge, KeyRound, Satellite, History, X, MapPin, Signal, ChevronsLeft, GripHorizontal, Pin, PinOff,
-  Palette, DoorOpen, Fuel, ChevronDown, AlertTriangle, List, Clock,
+  Palette, Fuel, ChevronLeft, AlertTriangle, List, Clock,
 } from "lucide-react";
-import { useAddress, useDevices, useGeofences, usePositions, useReport } from "@/lib/api";
-import { fixAt, fmtDuration, fmtNum, knToKmh, mToKm, timeAgo } from "@/lib/format";
+import { useAddress, useDevices, useGeofences, usePositions, useStateSince } from "@/lib/api";
+import { fixAt, fmtDurationFull, fmtNum, knToKmh, mToKm, timeAgo } from "@/lib/format";
 import { iconOf } from "@/lib/vehicle";
-import { stamp as cairoStamp } from "@/lib/tz";
+import { timeDate } from "@/lib/tz";
 import { vehState } from "@/lib/vstate";
 import type { VisualState } from "@/lib/format";
 import { usePersisted } from "@/lib/hooks";
@@ -177,76 +177,75 @@ export default function Live() {
   );
 }
 
-/** 2026-10-18 21:48:09 in Egypt time — fixed numeric format, same in both languages. */
-const stamp = (iso: string) => cairoStamp(Date.parse(iso));
+/** Re-renders every `ms` so the card's durations keep counting (local only, no requests). */
+function useNow(ms: number) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { const i = setInterval(() => setNow(Date.now()), ms); return () => clearInterval(i); }, [ms]);
+  return now;
+}
 
-function Detail({ row: { d, p, st, vs, color: c }, onClose }: { row: Row; onClose: () => void }) {
+const Chip = ({ icon: Ic, label, value }: { icon: typeof Gauge; label: string; value: string }) => (
+  <div className="bg-white/10 rounded-lg px-2 py-1.5">
+    <div className="flex items-center gap-1 text-[10px] text-white/60"><Ic size={11} />{label}</div>
+    <div className="text-xs font-medium tabular-nums">{value}</div>
+  </div>
+);
+
+function Detail({ row: { d, p, st, vs }, onClose }: { row: Row; onClose: () => void }) {
   const { t } = useI18n();
   const [edit, setEdit] = useState(false);
   const [more, setMore] = usePersisted("live.detail.more", false);
   const a = p?.attributes ?? {};
-  const address = useAddress(p?.latitude, p?.longitude, p?.address);
-  // how long it has been in this state: the open-ended trip / stop in Traccar's reports (last ~2 days, refreshed each minute)
-  const win = useMemo(() => { const h = 36e5, to = Math.ceil(Date.now() / h) * h + h; return { from: new Date(to - 50 * h).toISOString(), to: new Date(to).toISOString() }; }, []);
-  const kind = st === "moving" ? "trips" : st === "stopped" ? "stops" : null;
-  const { data: segs } = useReport<{ startTime: string; endTime: string }[]>(kind ?? "stops", kind ? win : null, d.id, "", { refreshInterval: 60000 });
-  const last = segs?.length ? segs.reduce((m, x) => (Date.parse(x.endTime) > Date.parse(m.endTime) ? x : m)) : null;
-  const since = last && Date.now() - Date.parse(last.endTime) < 5 * 60000 ? Date.parse(last.startTime) : null;
+  const address = useAddress(more ? p?.latitude : undefined, p?.longitude, p?.address); // looked up only once the details are open
+  const ign = typeof a.ignition === "boolean" ? a.ignition : undefined;
+  // a motion duration only when the status shown and the tracker's own motion flag agree
+  const moving = st === "moving" ? true : st === "stopped" ? false : undefined;
+  const motion = moving !== undefined && a.motion === moving ? moving : undefined;
+  const since = useStateSince(d.id, ign, motion, !!p && st !== "offline" && st !== "unknown");
+  const now = useNow(1000);
   const skew = p ? (Date.parse(p.fixTime) - Date.parse(p.serverTime)) / 36e5 : 0;
   const fix = p ? fixAt(p) : null;
-  const I = iconOf(d.category);
   const kmh = st === "nofix" ? 0 : knToKmh(p?.speed);
-  const ign = a.ignition == null ? null : a.ignition ? t("wait.on") : t("wait.off");
-  const Row = ({ k, children }: { k: string; children: React.ReactNode }) => (
-    <div className="flex gap-1.5 text-[13px] leading-6"><span className="text-muted shrink-0">{k}:</span><span className="min-w-0 flex-1 break-words">{children}</span></div>
-  );
-  const Chip = ({ icon: Ic, label, value }: { icon: typeof Gauge; label: string; value: string }) => (
-    <div className="bg-fg/[.06] rounded-lg px-2 py-1.5">
-      <div className="flex items-center gap-1 text-[10px] text-muted"><Ic size={11} />{label}</div>
-      <div className="text-xs font-medium tabular-nums">{value}</div>
-    </div>
-  );
+  const dur = (ms: number | null) => (ms == null ? null : <span className="tabular-nums">({fmtDurationFull(now - ms)})</span>);
   return (
-    <div className="bg-solid/95 backdrop-blur-md border border-line rounded-2xl p-3.5 space-y-1.5 max-h-[min(60vh,var(--ph,60vh))] overflow-y-auto" style={{ boxShadow: "0 12px 40px var(--shadow)" }}>
-      <div className="flex items-center gap-2 pb-1">
-        <span className="size-8 rounded-lg grid place-items-center shrink-0" style={{ background: c + "26", color: c }}><I size={17} /></span>
-        <h3 className="font-semibold truncate flex-1">{d.name}{d.model ? <span className="text-muted font-normal"> ({d.model})</span> : null}</h3>
-        <button onClick={() => setMore((v) => !v)} className="btn !p-2" aria-label="toggle"><ChevronDown size={14} className={more ? "rotate-180" : ""} /></button>
-        <button onClick={onClose} className="btn !p-2" aria-label={t("common.close")}><X size={14} /></button>
-      </div>
-      {p ? (
-        <>
-          <Row k={t("tbl.time")}>{fix ? <><span className="tabular-nums" dir="ltr">{stamp(fix)}</span> <span className="text-muted text-xs">· {timeAgo(fix)}</span></> : <span className="text-amber-400 text-xs">{t("live.timeunknown")}</span>}</Row>
-          {/* the tracker still reports, but without a new GPS fix: say so instead of passing the old location off as current */}
-          {(!fix || Date.parse(p.serverTime) - Date.parse(fix) > 2 * 60000) && (
-            <div className="flex gap-1.5 text-[13px] leading-6"><span className="text-muted shrink-0">{t("live.lastmsg")}:</span><span className="min-w-0 flex-1 break-words text-xs">{timeAgo(p.serverTime)} · <span className="text-amber-400">{t("live.nonewfix")}</span></span></div>
-          )}
-          <Row k={t("stat.state")}>
-            <span className="inline-flex items-center gap-1.5 font-medium" style={{ color: c }}><span className="size-2 rounded-full" style={{ background: c }} />{t(sk(vs))}</span>
-            {st === "moving" && <span className="tabular-nums">، {fmtNum(kmh)} {t("unit.kmh")}</span>}
-          </Row>
-          <Row k={t("tbl.engine")}>
-            {ign ?? "—"}{since ? <span className="text-muted tabular-nums"> ({t(st === "moving" ? "wait.driving" : "wait.nowhint")} {fmtDuration(Date.now() - since)})</span> : null}
-          </Row>
-          <Row k={t("tbl.location")}><span className="text-xs">{address || `${p.latitude.toFixed(5)}, ${p.longitude.toFixed(5)}`}</span></Row>
-          {more && (
-            <div className="grid grid-cols-3 gap-1.5 pt-1.5">
-              <Chip icon={Battery} label={t("stat.battery")} value={a.batteryLevel != null ? `${fmtNum(a.batteryLevel)}%` : "—"} />
-              <Chip icon={Signal} label={t("stat.signal")} value={a.rssi != null ? String(a.rssi) : "—"} />
-              <Chip icon={Satellite} label={t("stat.sats")} value={a.sat != null ? String(a.sat) : p.valid ? "OK" : t("stat.nofix")} />
-              {a.door != null && <Chip icon={DoorOpen} label={t("stat.door")} value={a.door ? t("stat.open") : t("stat.closed")} />}
-              {a.fuel1 != null && <Chip icon={Fuel} label={t("stat.fuel")} value={String(a.fuel1)} />}
-              <Chip icon={MapPin} label={t("stat.odometer")} value={a.totalDistance ? `${fmtNum(mToKm(a.totalDistance))} ${t("unit.km")}` : "—"} />
-            </div>
-          )}
-          {Math.abs(skew) > 1 && (
-            <p className="text-[11px] text-amber-400 flex gap-1.5"><AlertTriangle size={13} className="shrink-0 mt-0.5" />{t("live.clockskew", { h: `${skew > 0 ? "+" : ""}${Math.round(skew)}` })}</p>
-          )}
-        </>
-      ) : <p className="text-sm text-muted">{t("live.nopos")}</p>}
-      <div className="flex gap-2 pt-1.5">
-        <Link href={`/devices/${d.id}`} className="btn btn-on flex-1 justify-center !py-2.5"><History size={14} />{t("live.history")}</Link>
-        <button className="btn" onClick={() => setEdit(true)} title={t("edit.title")}><Palette size={14} /></button>
+    <div className="vcard">
+      <button onClick={() => setMore((v) => !v)} className="vcard-toggle" aria-label={t("card.more")} aria-expanded={more}><ChevronLeft size={22} className={more ? "-rotate-90" : ""} /></button>
+      <div className="vcard-body">
+        <div>{d.name}{d.model ? `(${d.model})` : ""}</div>
+        {p ? (
+          <>
+            {fix ? <div>{t("tbl.time")}: <span className="tabular-nums" dir="ltr">{timeDate(Date.parse(fix))}</span></div>
+              : <div className="text-xs text-amber-300">{t("live.timeunknown")}</div>}
+            {/* the tracker still reports, but without a new GPS fix: say so instead of passing the old location off as current */}
+            {fix && Date.parse(p.serverTime) - Date.parse(fix) > 2 * 60000 && <div className="text-xs text-amber-300">{t("live.lastmsg")}: {timeAgo(p.serverTime)} · {t("live.nonewfix")}</div>}
+            <div>{t("stat.state")}: {st === "moving" ? t("card.moving") : st === "stopped" ? t("card.stopped") : t(sk(vs))}{dur(since.motion)}</div>
+            {ign !== undefined && <div>{t("tbl.engine")}: {t(ign ? "card.engon" : "card.engoff")}{dur(since.ign)}</div>}
+            {typeof a.door === "boolean" && <div>{t("stat.door")}: {t(a.door ? "stat.open" : "stat.closed")}</div>}
+            {more && (
+              <div className="space-y-1.5 pt-2 mt-1.5 border-t border-white/15">
+                <div className="text-xs text-white/80 flex gap-1.5"><MapPin size={13} className="shrink-0 mt-0.5" />{address || `${p.latitude.toFixed(5)}, ${p.longitude.toFixed(5)}`}</div>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <Chip icon={Gauge} label={t("stat.speed")} value={`${fmtNum(kmh)} ${t("unit.kmh")}`} />
+                  <Chip icon={Battery} label={t("stat.battery")} value={a.batteryLevel != null ? `${fmtNum(a.batteryLevel)}%` : "—"} />
+                  <Chip icon={Signal} label={t("stat.signal")} value={a.rssi != null ? String(a.rssi) : "—"} />
+                  <Chip icon={Satellite} label={t("stat.sats")} value={a.sat != null ? String(a.sat) : p.valid ? "OK" : t("stat.nofix")} />
+                  {a.fuel1 != null && <Chip icon={Fuel} label={t("stat.fuel")} value={String(a.fuel1)} />}
+                  <Chip icon={MapPin} label={t("stat.odometer")} value={a.totalDistance ? `${fmtNum(mToKm(a.totalDistance))} ${t("unit.km")}` : "—"} />
+                </div>
+                {Math.abs(skew) > 1 && (
+                  <p className="text-[11px] text-amber-300 flex gap-1.5"><AlertTriangle size={13} className="shrink-0 mt-0.5" />{t("live.clockskew", { h: `${skew > 0 ? "+" : ""}${Math.round(skew)}` })}</p>
+                )}
+              </div>
+            )}
+          </>
+        ) : <div className="text-white/70">{t("live.nopos")}</div>}
+        {more && (
+          <div className="flex gap-2 pt-2">
+            <Link href={`/devices/${d.id}`} className="vcard-btn flex-1 justify-center"><History size={14} />{t("live.history")}</Link>
+            <button className="vcard-btn" onClick={() => setEdit(true)} title={t("edit.title")}><Palette size={14} /></button>
+            <button className="vcard-btn" onClick={onClose} title={t("common.close")} aria-label={t("common.close")}><X size={14} /></button>
+          </div>
+        )}
       </div>
       {edit && <DeviceEditor device={d} onClose={() => setEdit(false)} />}
     </div>

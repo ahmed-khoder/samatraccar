@@ -140,9 +140,11 @@ select.input { appearance: auto; }
 }
 .veh.offline, .veh.unknown { opacity: .7; }
 .veh.offline:not(.top) .heading, .veh.unknown:not(.top) .heading { display: none; }
+/* name tag beside the icon: white, dark text, same in both themes */
 .vw .lbl {
-  position: absolute; top: calc(22px + var(--half, 22px) * var(--k, 1) + 4px); pointer-events: none; left: 50%; transform: translateX(-50%); white-space: nowrap;
-  font-size: 10.5px; padding: 1px 7px; border-radius: 7px; background: rgba(7,11,20,.88); color: #fff; border: 1px solid rgba(255,255,255,.18);
+  position: absolute; top: 50%; left: calc(22px + var(--half, 22px) * var(--k, 1) + 3px); transform: translateY(-50%); pointer-events: none; white-space: nowrap;
+  font-size: 12px; font-weight: 600; line-height: 1.5; padding: 1px 7px; border-radius: 4px; background: #fff; color: #111; border: 1px solid rgba(0,0,0,.18);
+  box-shadow: 0 1px 4px rgba(0,0,0,.3);
 }
 @keyframes pulse { from { transform: scale(1); opacity: .8; } to { transform: scale(1.7); opacity: 0; } }
 
@@ -195,6 +197,17 @@ html[lang="en"] body { font-family: var(--font-sans); }
   background: inherit; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--panel-solid);
 }
 [data-below="1"] .pop-arrow { bottom: auto; top: -6px; transform: rotate(225deg); }
+
+/* the live vehicle card: dark translucent panel with white text in both themes; the ‹ on the left edge folds the details */
+.vcard { --vbg: rgba(58,58,60,.9); position: relative; background: var(--vbg); color: #fff; border-radius: 14px; box-shadow: 0 8px 28px rgba(0,0,0,.35); backdrop-filter: blur(6px); }
+.vcard-body { padding: 10px 14px 10px 34px; font-size: 14px; line-height: 1.65; max-height: min(60vh, var(--ph, 60vh)); overflow-y: auto; }
+.vcard-toggle { position: absolute; left: 4px; top: 50%; transform: translateY(-50%); width: 26px; height: 44px; display: grid; place-items: center; border-radius: 8px; color: rgba(255,255,255,.75); }
+.vcard-toggle:hover { color: #fff; background: rgba(255,255,255,.1); }
+.vcard-toggle svg { transition: transform .2s; }
+.vcard-btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; border-radius: 10px; font-size: 13px; background: rgba(255,255,255,.12); color: #fff; }
+.vcard-btn:hover { background: rgba(255,255,255,.2); }
+/* tail in the card colour; clipped to its outer half so the translucent colour doesn't double up over the card */
+.pop-wrap:has(.vcard) .pop-arrow { background: rgba(58,58,60,.9); border: 0; clip-path: polygon(100% 0, 100% 100%, 0 100%); }
 
 /* ---------- phones ---------- */
 html { -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
