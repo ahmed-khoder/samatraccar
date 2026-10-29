@@ -91,7 +91,7 @@ export default function Dashboard() {
         <Kpi label={t("kpi.avgspeed")} value={loading ? "–" : fmtNum(avgSpeed(f))} unit={t("unit.kmh")} icon={Gauge} color="#fbbf24" />
         <Kpi label={t("kpi.driving")} value={loading ? "–" : fmtDuration(f.movingMs)} icon={Timer} color="#22d3ee" />
         <Kpi label={t("kpi.idle")} value={loading ? "–" : fmtDuration(f.idleMs)} icon={Pause} color="#fb923c" sub={t("kpi.idlepct", { p: fmtNum(idlePct) })} />
-        <Kpi label={t("kpi.overspeed")} value={loading ? "–" : f.overCount} icon={OctagonAlert} color="#f43f5e" sub={t("kpi.overlimit", { n: an.data?.limit ?? 100 })} />
+        <Kpi label={t("kpi.overspeed")} value={loading ? "–" : f.overCount} icon={OctagonAlert} color="#f43f5e" sub={t("kpi.overlimit", { n: an.data?.limit ?? 80 })} />
         <Kpi label={t("kpi.harsh")} value={loading ? "–" : f.harshBrake + f.harshAccel} icon={Clock} color="#f472b6" sub={t("kpi.harshsub", { b: f.harshBrake, a: f.harshAccel })} />
         <Kpi label={t("kpi.score")} value={loading ? "–" : avgScore} unit="/100" icon={ShieldCheck} color="#34d399" />
         <Kpi label={t("kpi.events")} value={events?.length ?? "–"} icon={Bell} color="#fb923c" />

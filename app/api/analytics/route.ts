@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
   const from = Date.parse(sp.get("from") ?? ""), to = Date.parse(sp.get("to") ?? "");
   if (!(from < to)) return NextResponse.json({ error: "bad range" }, { status: 400 });
   if (to - from > 32 * 864e5) return NextResponse.json({ error: "range too large (max 31 days)" }, { status: 400 });
-  const limit = Number(sp.get("limit") ?? 100) || 100;
+  const limit = Number(sp.get("limit") ?? 80) || 80;
   const only = sp.get("devices")?.split(",").map(Number).filter(Boolean);
   try {
     const devices = await analyze(token, from, to, limit, only);

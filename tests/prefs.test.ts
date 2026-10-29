@@ -30,3 +30,20 @@ test("cookie parsing still works", () => {
   assert.equal(parsePrefs("%%%bad").colorMode, DEFAULT_PREFS.colorMode);
   assert.equal(parsePrefs(null), DEFAULT_PREFS);
 });
+
+test("approved defaults (settings screenshot)", () => {
+  assert.deepEqual(DEFAULT_PREFS, {
+    theme: "light", nav: "end", navMode: "hover", list: "start", listMode: "hover", limit: 80, trails: true, labels: true,
+    tile: "light", geo: "server", colorMode: "state", cMoving: "#22c55e", cIdle: "#f59e0b", cStopped: "#70cfff", cOver: "#f01919",
+    cOffline: "#64748b", autoScale: true, iconSize: 1.4, ctl: "auto",
+  });
+});
+
+test("no saved value -> defaults; saved values (incl. old defaults and false) are kept", () => {
+  assert.deepEqual(normalizePrefs({}), DEFAULT_PREFS);
+  assert.deepEqual(parsePrefs(undefined), DEFAULT_PREFS);
+  const mine = { theme: "dark", nav: "start", limit: 100, tile: "auto", iconSize: 1, labels: false, trails: false, autoScale: false, cStopped: "#ef4444" };
+  const p = normalizePrefs(mine);
+  assert.deepEqual({ ...p }, { ...DEFAULT_PREFS, ...mine });
+  assert.equal(parsePrefs(encodeURIComponent(JSON.stringify(mine))).theme, "dark");
+});
