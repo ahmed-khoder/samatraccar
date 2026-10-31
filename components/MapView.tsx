@@ -6,6 +6,7 @@ import type { Device, Geofence, Position } from "@/lib/types";
 import { knToKmh, speedColor, type VisualState } from "@/lib/format";
 import { deviceColor, iconSvg, TOP_VIEW } from "@/lib/vehicle";
 import { vehState } from "@/lib/vstate";
+import { glideMs } from "@/lib/glide";
 import { useI18n } from "@/lib/i18n";
 import { usePrefs } from "@/lib/prefs";
 import { Layers, Crosshair, Flame, Hexagon, Route as RouteIcon, Tag, Maximize2, Palette, Pin, PinOff, EyeOff, SlidersHorizontal } from "lucide-react";
@@ -224,12 +225,14 @@ export default function MapView({ devices = [], positions = [], selectedId, onSe
       const now = performance.now();
       anims.current.forEach((a, id) => {
         if (a.t0 > 0) {
-          const k = Math.min(1, (now - a.t0) / a.dur), e = ease(k);
+          // constant speed between the two points, so consecutive updates join into one even movement; the heading turns quickly
+          const k = Math.min(1, (now - a.t0) / a.dur), e = k, turn = ease(Math.min(1, (now - a.t0) / 800));
           a.cur = [a.from[0] + (a.to[0] - a.from[0]) * e, a.from[1] + (a.to[1] - a.from[1]) * e];
-          a.curC = lerpAngle(a.fromC, a.toC, e);
+          a.curC = lerpAngle(a.fromC, a.toC, turn);
           if (!zooming.current) a.marker.setLatLng(a.cur);
           const h = a.marker.getElement()?.querySelector<HTMLElement>(".heading");
           if (h) h.style.transform = `rotate(${a.curC}deg)`;
+          if (live.current.trails && a.state === "moving" && a.trail.length) a.poly.setLatLngs([...a.trail, a.cur]);
           if (k >= 1) a.t0 = 0;
           if (live.current.selectedId === id && live.current.follow) m.panTo(a.cur, { animate: false });
         }
@@ -333,12 +336,13 @@ export default function MapView({ devices = [], positions = [], selectedId, onSe
           let course = p.course || 0;
           if (!p.course && dist > 5) course = bearing(a.cur, ll);
           a.from = a.cur; a.to = ll; a.fromC = a.curC; a.toC = course;
-          // jump straight to the reported fix: gliding over the update interval (up to 15 s) kept the marker behind
-          // the real position and drew points along a straight line that the vehicle never reported
-          a.dur = 1;
+          // the server now reports in steps: glide there over the update interval, so the marker runs about one interval behind
+          // the reported position, always on the straight line between two reported points
+          a.dur = glideMs(now - a.lastChange, dist);
           a.t0 = now; a.lastChange = now;
+          // the trail holds points already reached; the frame loop draws its last piece up to the marker
           const last = a.trail[a.trail.length - 1];
-          if (!last || m.distance(last, ll) > 8) { a.trail.push(ll); if (a.trail.length > 60) a.trail.shift(); }
+          if (!last || m.distance(last, a.from) > 8) { a.trail.push(a.from); if (a.trail.length > 60) a.trail.shift(); }
         }
         if (a.sig !== sig) {
           a.marker.setIcon(L.divIcon({ className: "", iconSize: [44, 44], iconAnchor: [22, 22], html: vehicleHtml({ cat: d.category, color, state: vs, selected, label: labelText, showLabel: labels, course: a.curC }) }));
@@ -351,7 +355,7 @@ export default function MapView({ devices = [], positions = [], selectedId, onSe
         a.state = state; a.name = d.name; a.kmh = kmh; a.half = half; a.top = !!(d.category && TOP_VIEW[d.category]);
       }
       const visible = live.current.trails && state === "moving" && a.trail.length > 1;
-      a.poly.setLatLngs(visible ? a.trail : []);
+      a.poly.setLatLngs(visible ? [...a.trail, a.cur] : []);
     });
     setCounts((c) => (JSON.stringify(c) === JSON.stringify(counts) ? c : counts));
     anims.current.forEach((a, id) => { if (!seen.has(id)) { a.marker.remove(); a.poly.remove(); anims.current.delete(id); } });
