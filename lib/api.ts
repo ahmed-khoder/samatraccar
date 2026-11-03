@@ -6,6 +6,7 @@ import { usePrefs } from "./prefs";
 import { type AnalyticsResponse, addAgg, emptyAgg, type DayAgg } from "./agg";
 import { mergePolled, mergePushed } from "./live-merge";
 import { addDays, startOfDay } from "./tz";
+import { lastPower, mergePower, silenceCause, stayStep, stillSince, type Power, type Silence, type Stay } from "./silence";
 import { SINCE_HOURS, SINCE_TTL, STATE_EVENTS, sinceStep, stateSince, type Since } from "./state-since";
 
 export const fetcher = async (url: string) => {
@@ -23,6 +24,12 @@ export const useDevices = () => useSWR<Device[]>(api("devices"), fetcher, { refr
 const LIVE = "/api/live";
 let liveNow: Position[] | undefined; // what the map shows, shared by both sources
 
+// Last known battery / signal / charging state per vehicle: it arrives in status messages between the GPS ones, so the newest position
+// often lacks it. Remembered from every live position and from the history the card loads; read with powerOf().
+const power = new Map<number, Power>();
+export const powerOf = (id: number) => power.get(id);
+function rememberPower(list: Position[]) { for (const p of list) { const w = lastPower([p]); if (w) power.set(p.deviceId, mergePower(power.get(p.deviceId), w)!); } }
+
 let stream: EventSource | null = null, streamUsers = 0;
 /** One EventSource per tab, however many components use live positions. */
 function useLiveStream() {
@@ -31,7 +38,7 @@ function useLiveStream() {
     if (streamUsers++ === 0) {
       stream = new EventSource("/api/stream");
       stream.addEventListener("positions", (e) => {
-        try { mutate(LIVE, (cur?: Position[]) => (liveNow = mergePushed(cur, JSON.parse((e as MessageEvent).data))), { revalidate: false }); } catch {}
+        try { mutate(LIVE, (cur?: Position[]) => { const pushed = JSON.parse((e as MessageEvent).data) as Position[]; rememberPower(pushed); return (liveNow = mergePushed(cur, pushed)); }, { revalidate: false }); } catch {}
       });
     }
     return () => { if (--streamUsers === 0) { stream?.close(); stream = null; } };
@@ -41,7 +48,7 @@ function useLiveStream() {
 export function usePositions() {
   useLiveStream();
   // a poll that started before a pushed update must not roll the map back to the older position
-  return useSWR<Position[]>(LIVE, async (u: string) => (liveNow = mergePolled(liveNow, await fetcher(u))), { refreshInterval: 3000 });
+  return useSWR<Position[]>(LIVE, async (u: string) => { const polled: Position[] = await fetcher(u); rememberPower(polled); return (liveNow = mergePolled(liveNow, polled)); }, { refreshInterval: 3000 });
 }
 
 export const useGeofences = () => useSWR<Geofence[]>(api("geofences"), fetcher);
@@ -96,6 +103,114 @@ export function useStateSince(id: number, ign: boolean | undefined, motion: bool
   }, [id, sig, enabled]); // eslint-disable-line react-hooks/exhaustive-deps -- sig is ign + motion
   const c = sinceCache.get(id);
   return enabled && c && c.sig === sig ? { ign: c.ign, motion: c.motion } : { ign: null, motion: null };
+}
+
+// Which disconnected vehicles lost their mobile connection (as opposed to power): one small positions request per disconnected
+// vehicle, for the 6 h before its last message. The answer cannot change until the vehicle reports again, so it is kept for good
+// (in this page and in localStorage), keyed by that last-message time; a failed request is not retried in the same page.
+const SILENCE_KEY = "tracar.silence.v4";
+type Verdict = { c: Silence; still: { t: number; atLeast: boolean } | null };
+const silence = new Map<string, Verdict>();
+let silenceLoaded = false;
+const silenceFailed = new Set<string>();
+function loadSilence() {
+  if (silenceLoaded || typeof window === "undefined") return;
+  silenceLoaded = true;
+  try { for (const [k, v] of Object.entries(JSON.parse(localStorage.getItem(SILENCE_KEY) ?? "{}"))) silence.set(k, v as Verdict); } catch {}
+}
+function saveSilence() {
+  try { localStorage.setItem(SILENCE_KEY, JSON.stringify(Object.fromEntries([...silence].slice(-200)))); } catch {}
+}
+
+/**
+ * For the disconnected vehicles, from their last messages: `cut` = ids whose mobile connection was lost (the red "no entry" sign);
+ * `still` = since when each has been at its last known place.
+ */
+export function useSimCut(devices: Device[] | undefined) {
+  const [, bump] = useState(0);
+  const targets = (devices ?? []).filter((d) => d.status !== "online" && d.lastUpdate).map((d) => ({ id: d.id, key: `${d.id}|${d.lastUpdate}`, at: Date.parse(d.lastUpdate!) }));
+  const sig = targets.map((x) => x.key).join(",");
+  useEffect(() => {
+    loadSilence();
+    let off = false;
+    (async () => {
+      for (const x of targets) {
+        if (off) return;
+        if (silence.has(x.key) || silenceFailed.has(x.key) || !Number.isFinite(x.at)) continue;
+        try {
+          const r = await fetch(`${api("positions")}?deviceId=${x.id}&from=${new Date(x.at - 6 * 36e5).toISOString()}&to=${new Date(x.at + 5 * 60000).toISOString()}`);
+          if (!r.ok) throw new Error(String(r.status));
+          const rows: Position[] = await r.json();
+          rows.sort((a, b) => a.id - b.id);
+          silence.set(x.key, { c: silenceCause(rows), still: stillSince(rows) });
+          saveSilence();
+          if (!off) bump((n) => n + 1);
+        } catch { silenceFailed.add(x.key); }
+        await new Promise((z) => setTimeout(z, 300));
+      }
+    })();
+    return () => { off = true; };
+  }, [sig]); // eslint-disable-line react-hooks/exhaustive-deps -- sig is the list of keys
+  loadSilence();
+  return useMemo(() => ({
+    cut: new Set(targets.filter((x) => silence.get(x.key)?.c === "network").map((x) => x.id)),
+    still: new Map(targets.flatMap((x) => { const s = silence.get(x.key)?.still; return s ? [[x.id, s] as const] : []; })),
+  }), [sig, silence.size]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
+// How long an online vehicle has been in the same place (a 300 m circle), for the card of the selected vehicle only: one positions
+// request for the last 6 h when the card opens, refreshed every 5 min or when the vehicle leaves the circle (at most once a minute),
+// never retried on its own after a failure.
+const stays = new Map<number, Stay>();
+const stayBusy = new Map<number, Promise<unknown>>();
+export function useStay(id: number, lat: number | undefined, lng: number | undefined, enabled: boolean) {
+  const [, bump] = useState(0);
+  // the vehicle's own position changes every few seconds; only a move of ~100 m can change the decision, so key on that grid
+  const gk = lat == null || lng == null ? "" : `${Math.round(lat * 1000)}|${Math.round(lng * 1000)}`;
+  useEffect(() => {
+    if (!enabled || lat == null || lng == null) return;
+    let off = false, timer: ReturnType<typeof setTimeout> | undefined;
+    const check = () => {
+      if (off) return;
+      const busy = stayBusy.get(id), step = stayStep(stays.get(id), Date.now(), { lat, lng }, !!busy);
+      if (step.do === "keep") return;
+      if (step.do === "join") { busy!.finally(check); return; }
+      if (step.do === "wait") { clearTimeout(timer); timer = setTimeout(check, step.ms); return; }
+      const to = Date.now() + 5 * 60000;
+      const job = fetch(`${api("positions")}?deviceId=${id}&from=${new Date(to - 6 * 36e5 - 5 * 60000).toISOString()}&to=${new Date(to).toISOString()}`)
+        .then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json() as Promise<Position[]>; })
+        .then((rows): Stay => {
+          rows.sort((a, b) => a.id - b.id);
+          const w = lastPower(rows); if (w) power.set(id, mergePower(power.get(id), w)!); // fills the battery chips of the card at once
+          return { at: Date.now(), lat, lng, failed: false, still: stillSince(rows) };
+        })
+        .catch((): Stay => ({ at: Date.now(), lat, lng, failed: true, still: null }))
+        .then((s) => { stays.set(id, s); stayBusy.delete(id); if (!off) bump((n) => n + 1); });
+      stayBusy.set(id, job);
+    };
+    check();
+    const every = setInterval(check, 60000);
+    return () => { off = true; clearTimeout(timer); clearInterval(every); };
+  }, [id, gk, enabled]); // eslint-disable-line react-hooks/exhaustive-deps -- gk is lat + lng on a 100 m grid
+  return enabled ? stays.get(id)?.still ?? null : null;
+}
+
+// Engine / motion "since" for the whole vehicle list: one events request for every connected vehicle (the four transition
+// types, last 48 h), refreshed every 5 minutes while the list is open and never retried on its own.
+export function useFleetSince(rows: { id: number; ign: boolean | undefined; motion: boolean | undefined }[]) {
+  const ids = rows.filter((r) => r.ign !== undefined || r.motion !== undefined).map((r) => r.id).sort((a, b) => a - b).join(",");
+  const { data } = useSWR<TEvent[]>(ids ? ["fleet-since", ids] : null, async () => {
+    const to = Date.now() + 60000;
+    return fetcher(`${api("reports/events")}?${ids.split(",").map((i) => `deviceId=${i}`).join("&")}&from=${new Date(to - SINCE_HOURS * 36e5).toISOString()}&to=${new Date(to).toISOString()}${STATE_EVENTS.map((t) => `&type=${t}`).join("")}`);
+  }, { refreshInterval: 300000, revalidateOnFocus: false, shouldRetryOnError: false, keepPreviousData: true });
+  return useMemo(() => {
+    const by = new Map<number, TEvent[]>();
+    for (const e of data ?? []) by.set(e.deviceId, [...(by.get(e.deviceId) ?? []), e]);
+    return new Map(rows.map((r) => {
+      const ev = by.get(r.id) ?? [];
+      return [r.id, { ign: stateSince(ev, "ignition", r.ign), motion: stateSince(ev, "motion", r.motion) }] as const;
+    }));
+  }, [data, rows]);
 }
 
 export function deriveAnalytics(data?: AnalyticsResponse) {

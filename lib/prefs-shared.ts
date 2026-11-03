@@ -20,11 +20,11 @@ export interface Prefs {
   ctl: "auto" | "pinned" | "hidden";
 }
 
-// cOver was read off a low-resolution settings screenshot (swatch pixels + blurred hex label), so it may be a shade off
-export const STATE_PALETTE = { cMoving: "#22c55e", cIdle: "#f59e0b", cStopped: "#70cfff", cOver: "#f01919", cOffline: "#64748b" } as const;
+// the palette the owner settled on in the settings page (read from the saved settings, 2026-11-02)
+export const STATE_PALETTE = { cMoving: "#23e76a", cIdle: "#f59e0b", cStopped: "#27aef1", cOver: "#f20202", cOffline: "#727374" } as const;
 
 export const DEFAULT_PREFS: Prefs = {
-  theme: "light", nav: "end", navMode: "hover", list: "start", listMode: "hover", limit: 80, trails: true, labels: true, tile: "light", geo: "server",
+  theme: "light", nav: "end", navMode: "hover", list: "start", listMode: "hover", limit: 80, trails: false, labels: true, tile: "sat", geo: "server",
   colorMode: "state", ...STATE_PALETTE, autoScale: true, iconSize: 1.4, ctl: "auto",
 };
 

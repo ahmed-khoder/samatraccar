@@ -45,6 +45,15 @@ function guardGlLayer<T extends object>(layer: T): T {
   return layer;
 }
 
+// Leaflet's canvas renderer can still run a redraw that was queued while the map was being removed (leaving the live map for
+// another page), after its context is gone: it threw "Cannot read properties of undefined (reading 'clearRect')". Skip it.
+const canvasProto = L.Canvas.prototype as unknown as { _redraw: () => void; _ctx?: CanvasRenderingContext2D; __guarded?: boolean };
+if (!canvasProto.__guarded) {
+  const redraw = canvasProto._redraw;
+  canvasProto._redraw = function (this: typeof canvasProto) { if (this._ctx) redraw.call(this); };
+  canvasProto.__guarded = true;
+}
+
 let rtlReady: Promise<void> | null = null;
 const ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services";
 const RASTER_FALLBACK = {
@@ -84,19 +93,25 @@ const bearing = (a: [number, number], b: [number, number]) => {
   return ((Math.atan2(y, x) / r) + 360) % 360;
 };
 
-function vehicleHtml(o: { cat?: string | null; color: string; state: string; selected: boolean; label: string; showLabel: boolean; course: number }) {
+const NO_LINK = '<svg class="nolink" viewBox="0 0 24 24" width="20" height="20"><circle cx="12" cy="12" r="10" fill="#fff"/><circle cx="12" cy="12" r="8.2" fill="none" stroke="#e11d1d" stroke-width="3"/><path d="M6.2 17.8 17.8 6.2" stroke="#e11d1d" stroke-width="3" stroke-linecap="round"/></svg>';
+
+function vehicleHtml(o: { cat?: string | null; color: string; state: string; selected: boolean; label: string; showLabel: boolean; course: number; net?: boolean }) {
   const top = o.cat ? TOP_VIEW[o.cat] : undefined;
   const half = top ? Math.round(top.h / 2) : 22;
   const lbl = o.showLabel ? `<div class="lbl">${esc(o.label)}</div>` : "";
+  // a lost mobile connection (and only that) carries the red "no entry" sign, as in the iTrack app
+  const off = o.net ? NO_LINK : "";
   if (top) {
     return `<div class="vw" style="--half:${half}px;--k:var(--s)"><div class="veh top ${o.state} ${o.selected ? "sel" : ""}" style="--c:${o.color}">
       ${o.selected ? '<div class="ring"></div>' : ""}
       <div class="heading" style="transform:rotate(${o.course}deg)"><div class="shape" style="width:${top.w}px;height:${top.h}px;margin:${-top.h / 2}px 0 0 ${-top.w / 2}px">${top.svg(o.color)}</div></div>
+      ${off}
     </div>${lbl}</div>`;
   }
   return `<div class="vw" style="--half:${half}px;--k:var(--sb)"><div class="veh ${o.state} ${o.selected ? "sel" : ""}" style="--c:${o.color}">
     <div class="heading" style="transform:rotate(${o.course}deg)"><i></i></div>
     <div class="badge">${iconSvg(o.cat, 18, o.color)}</div>
+    ${off}
   </div>${lbl}</div>`;
 }
 
@@ -145,13 +160,26 @@ interface Props {
   geofences?: Geofence[];
   route?: Position[];
   routeDevice?: Device | null;
+  /** How the route line is coloured: by speed bands (default), or one colour; over `routeLimit` km/h is red either way. */
+  routeMode?: "speed" | "plain";
+  routeLimit?: number;
+  /** Parking markers on the route, with the text of their tooltip. */
+  routeStops?: { lat: number; lng: number; label: string }[];
   cursor?: number;
   follow?: boolean;
   className?: string;
   controlsSide?: "left" | "right";
+  /** Called with the device's own position while "my location" is on, null when it is switched off. */
+  onMe?: (me: { lat: number; lng: number } | null) => void;
+  /** Disconnected vehicles that lost their mobile connection: only these carry the red "no entry" sign. */
+  simCut?: Set<number>;
 }
 
-export default function MapView({ devices = [], positions = [], selectedId, onSelect, onDeselect, popup, geofences = [], route, routeDevice, cursor = 0, follow, className, controlsSide = "right" }: Props) {
+const MBtn = ({ on, onClick, title, children }: { on?: boolean; onClick: () => void; title: string; children: React.ReactNode }) => (
+  <button className={`mbtn ${on ? "on" : ""}`} onClick={onClick} title={title} aria-label={title} aria-pressed={on}>{children}</button>
+);
+
+export default function MapView({ devices = [], positions = [], selectedId, onSelect, onDeselect, popup, geofences = [], route, routeDevice, routeMode = "speed", routeLimit, routeStops, cursor = 0, follow, className, controlsSide = "right", onMe, simCut }: Props) {
   const { t, dir } = useI18n();
   const el = useRef<HTMLDivElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
@@ -166,11 +194,17 @@ export default function MapView({ devices = [], positions = [], selectedId, onSe
   const anims = useRef(new Map<number, Anim>());
   const fenceLayer = useRef<L.LayerGroup | null>(null);
   const routeLayer = useRef<L.LayerGroup | null>(null);
+  const stopLayer = useRef<L.LayerGroup | null>(null);
   const heatLayer = useRef<L.Layer | null>(null);
   const routeMarker = useRef<L.Marker | null>(null);
   const fitted = useRef(false);
   const controlsSideRef = useRef(controlsSide);
   const raf = useRef(0);
+  const locateEl = useRef<HTMLAnchorElement | null>(null);
+  const meLayer = useRef<L.LayerGroup | null>(null);
+  const watchId = useRef<number | null>(null);
+  const toggleLocate = useRef<() => void>(() => {});
+  const [toast, setToast] = useState("");
   const { prefs, set: setPrefs, resolvedTheme } = usePrefs();
   const style = prefs.tile === "auto" ? (resolvedTheme === "light" ? "light" : "dark") : prefs.tile;
   const trails = prefs.trails, labels = prefs.labels;
@@ -198,14 +232,59 @@ export default function MapView({ devices = [], positions = [], selectedId, onSe
   scaleRef.current = applyScale;
   useEffect(() => { applyScale(); }, [applyScale]);
 
+  // "my location": a real fix from the device's GPS, drawn as a blue dot with its accuracy circle and kept up to date while it is
+  // on; pressing the button again turns it off. Browsers allow this only on HTTPS (or localhost), which the message says.
+  const onMeRef = useRef(onMe);
+  onMeRef.current = onMe;
+  useEffect(() => {
+    const stop = () => {
+      if (watchId.current != null) navigator.geolocation.clearWatch(watchId.current);
+      watchId.current = null; meLayer.current?.clearLayers(); locateEl.current?.classList.remove("on"); onMeRef.current?.(null);
+    };
+    toggleLocate.current = () => {
+      const m = map.current; if (!m) return;
+      if (watchId.current != null) { stop(); return; }
+      if (!window.isSecureContext || !navigator.geolocation) { setToast(t("loc.secure")); return; }
+      meLayer.current ??= L.layerGroup().addTo(m);
+      let first = true;
+      locateEl.current?.classList.add("on");
+      watchId.current = navigator.geolocation.watchPosition((pos) => {
+        const ll: [number, number] = [pos.coords.latitude, pos.coords.longitude], g = meLayer.current!;
+        g.clearLayers();
+        L.circle(ll, { radius: pos.coords.accuracy, color: "#2563eb", weight: 1, fillOpacity: 0.12, interactive: false }).addTo(g);
+        L.circleMarker(ll, { radius: 7, color: "#fff", weight: 3, fillColor: "#2563eb", fillOpacity: 1, interactive: false }).addTo(g);
+        onMeRef.current?.({ lat: ll[0], lng: ll[1] });
+        if (first) { first = false; m.setView(ll, Math.max(m.getZoom(), 15)); }
+      }, (err) => { stop(); setToast(t(err.code === 1 ? "loc.denied" : "loc.fail")); }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
+    };
+    return () => { if (watchId.current != null) navigator.geolocation.clearWatch(watchId.current); watchId.current = null; };
+  }, [t]);
+  useEffect(() => { if (!toast) return; const i = setTimeout(() => setToast(""), 6000); return () => clearTimeout(i); }, [toast]);
+
   // init map + animation loop
   useEffect(() => {
     if (!el.current || map.current) return;
     const m = L.map(el.current, { zoomControl: false, preferCanvas: true, zoomSnap: 0.5, zoomAnimation: true }).setView([30.04, 31.23], 6);
     L.control.zoom({ position: controlsSideRef.current === "left" ? "bottomleft" : "bottomright" }).addTo(m);
+    // "my location": added after the zoom buttons, so it sits right above them (later bottom controls stack on top)
+    const Locate = L.Control.extend({
+      onAdd() {
+        const box = L.DomUtil.create("div", "leaflet-bar locate-ctl");
+        const a = L.DomUtil.create("a", "", box);
+        a.href = "#"; a.role = "button";
+        a.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/></svg>';
+        locateEl.current = a;
+        L.DomEvent.disableClickPropagation(box);
+        L.DomEvent.on(a, "click", (e) => { L.DomEvent.preventDefault(e); toggleLocate.current(); });
+        return box;
+      },
+    });
+    new Locate({ position: controlsSideRef.current === "left" ? "bottomleft" : "bottomright" }).addTo(m);
     map.current = m;
     // while Leaflet animates a zoom it positions the markers itself; moving them from our loop too made them jitter
     m.on("zoomstart", () => { zooming.current = true; });
+    // safety net: once the map is no longer animating a zoom, nothing may keep the card hidden
+    m.on("moveend", () => { if (!(m as unknown as { _animatingZoom?: boolean })._animatingZoom) zooming.current = false; });
     m.on("click", () => { deselect.current?.(); closeCtl.current(); }); // on touch screens a tap on the map also tucks the tools away
     // resize the icons toward the zoom we are heading to (zoomanim = target zoom), and follow flyTo / pinch frame by frame
     m.on("zoomanim", (e) => scaleRef.current((e as L.ZoomAnimEvent).zoom));
@@ -218,6 +297,7 @@ export default function MapView({ devices = [], positions = [], selectedId, onSe
     scaleRef.current();
     fenceLayer.current = L.layerGroup().addTo(m);
     routeLayer.current = L.layerGroup().addTo(m);
+    stopLayer.current = L.layerGroup().addTo(m);
     const ro = new ResizeObserver(() => m.invalidateSize());
     ro.observe(el.current);
 
@@ -234,7 +314,8 @@ export default function MapView({ devices = [], positions = [], selectedId, onSe
           if (h) h.style.transform = `rotate(${a.curC}deg)`;
           if (live.current.trails && a.state === "moving" && a.trail.length) a.poly.setLatLngs([...a.trail, a.cur]);
           if (k >= 1) a.t0 = 0;
-          if (live.current.selectedId === id && live.current.follow) m.panTo(a.cur, { animate: false });
+          // not while the map is flying to the vehicle: a pan in the middle of flyTo stops it without a zoomend, which left the card hidden
+          if (live.current.selectedId === id && live.current.follow && !zooming.current) m.panTo(a.cur, { animate: false });
         }
       });
       const pe = popRef.current, sid = live.current.selectedId;
@@ -317,12 +398,13 @@ export default function MapView({ devices = [], positions = [], selectedId, onSe
       counts[vs]++;
       const selected = d.id === selectedId;
       const half = d.category && TOP_VIEW[d.category] ? TOP_VIEW[d.category].h / 2 : 22;
-      const sig = [d.category, color, vs, selected, d.name, labels].join("|");
+      const net = !!simCut?.has(d.id) && (state === "offline" || state === "unknown");
+      const sig = [d.category, color, vs, selected, d.name, labels, net].join("|");
       const labelText = d.name;
       let a = anims.current.get(d.id);
       if (!a) {
         const marker = L.marker(ll, {
-          icon: L.divIcon({ className: "", iconSize: [44, 44], iconAnchor: [22, 22], html: vehicleHtml({ cat: d.category, color, state: vs, selected, label: labelText, showLabel: labels, course: p.course || 0 }) }),
+          icon: L.divIcon({ className: "", iconSize: [44, 44], iconAnchor: [22, 22], html: vehicleHtml({ cat: d.category, color, state: vs, selected, label: labelText, showLabel: labels, net, course: p.course || 0 }) }),
           zIndexOffset: selected ? 1000 : 0, keyboard: false,
         }).addTo(m);
         marker.on("click", () => onSelect?.(d.id));
@@ -345,7 +427,7 @@ export default function MapView({ devices = [], positions = [], selectedId, onSe
           if (!last || m.distance(last, a.from) > 8) { a.trail.push(a.from); if (a.trail.length > 60) a.trail.shift(); }
         }
         if (a.sig !== sig) {
-          a.marker.setIcon(L.divIcon({ className: "", iconSize: [44, 44], iconAnchor: [22, 22], html: vehicleHtml({ cat: d.category, color, state: vs, selected, label: labelText, showLabel: labels, course: a.curC }) }));
+          a.marker.setIcon(L.divIcon({ className: "", iconSize: [44, 44], iconAnchor: [22, 22], html: vehicleHtml({ cat: d.category, color, state: vs, selected, label: labelText, showLabel: labels, net, course: a.curC }) }));
           a.marker.setZIndexOffset(selected ? 1000 : 0);
           a.poly.setStyle({ color });
           a.sig = sig;
@@ -360,7 +442,7 @@ export default function MapView({ devices = [], positions = [], selectedId, onSe
     setCounts((c) => (JSON.stringify(c) === JSON.stringify(counts) ? c : counts));
     anims.current.forEach((a, id) => { if (!seen.has(id)) { a.marker.remove(); a.poly.remove(); anims.current.delete(id); } });
     if (!fitted.current && bounds.length) { m.fitBounds(bounds, { padding: [70, 70], maxZoom: 14 }); fitted.current = true; }
-  }, [devices, positions, selectedId, route, onSelect, labels, trails, prefs.limit, prefs.colorMode, prefs.cMoving, prefs.cIdle, prefs.cStopped, prefs.cOver, prefs.cOffline]);
+  }, [devices, positions, selectedId, route, onSelect, labels, trails, prefs.limit, prefs.colorMode, prefs.cMoving, prefs.cIdle, prefs.cStopped, prefs.cOver, prefs.cOffline, simCut]);
 
   useEffect(() => {
     const m = map.current; if (!m || route || !selectedId) return;
@@ -384,10 +466,20 @@ export default function MapView({ devices = [], positions = [], selectedId, onSe
           .heatLayer(route.map((p) => [p.latitude, p.longitude, 0.5]), { radius: 18, blur: 20 }).addTo(map.current);
       });
     } else {
+      // one polyline per run of the same colour: a month of points stays light to draw
+      const colorOf = (p: Position) => {
+        const kmh = knToKmh(p.speed);
+        if (routeLimit != null && kmh > routeLimit) return "#ef4444";
+        return routeMode === "plain" ? "#2563eb" : speedColor(kmh);
+      };
+      let run: L.LatLngTuple[] = [[route[0].latitude, route[0].longitude]], runColor = route.length > 1 ? colorOf(route[1]) : "";
+      const flush = () => { if (run.length > 1) g.addLayer(L.polyline(run, { color: runColor, weight: 5, opacity: 0.9, renderer: canvas, interactive: false })); };
       for (let i = 1; i < route.length; i++) {
-        const a = route[i - 1], b = route[i];
-        g.addLayer(L.polyline([[a.latitude, a.longitude], [b.latitude, b.longitude]], { color: speedColor(knToKmh(b.speed)), weight: 5, opacity: 0.9, renderer: canvas }));
+        const b = route[i], c = colorOf(b), ll: L.LatLngTuple = [b.latitude, b.longitude];
+        if (c !== runColor) { flush(); run = [run[run.length - 1]]; runColor = c; }
+        run.push(ll);
       }
+      flush();
     }
     const s = route[0], e = route[route.length - 1];
     const pin = (p: Position, c: string, lab: string) =>
@@ -399,7 +491,19 @@ export default function MapView({ devices = [], positions = [], selectedId, onSe
       zIndexOffset: 2000, interactive: false,
     }).addTo(g);
     m.fitBounds(route.map((p) => [p.latitude, p.longitude] as L.LatLngTuple), { padding: [50, 50] });
-  }, [route, heat, routeDevice, t]);
+  }, [route, heat, routeDevice, routeMode, routeLimit, t]);
+
+  // parking markers: their own layer, so changing the minimum duration does not redraw or re-fit the route
+  useEffect(() => {
+    const g = stopLayer.current; if (!g) return;
+    g.clearLayers();
+    (routeStops ?? []).forEach((s, k) => {
+      g.addLayer(L.marker([s.lat, s.lng], {
+        icon: L.divIcon({ className: "", iconSize: [22, 22], iconAnchor: [11, 11], html: `<div class="pstop">P<small>${k + 1}</small></div>` }),
+        zIndexOffset: 500, keyboard: false,
+      }).bindTooltip(s.label, { direction: "top", offset: [0, -10] }));
+    });
+  }, [routeStops]);
 
   // playback cursor (fractional index → smooth interpolation between samples)
   useEffect(() => {
@@ -428,14 +532,35 @@ export default function MapView({ devices = [], positions = [], selectedId, onSe
   );
 
   return (
-    <div ref={wrap} className={`relative ${className ?? "h-full w-full"}`}>
+    <div ref={wrap} className={`relative ${className ?? "h-full w-full"} ${selectedId != null && !route ? "sel-bar" : ""}`}>
       <div ref={el} className="absolute inset-0" dir="ltr" />
+      {toast && <div className="glass absolute z-[720] top-3 inset-x-14 p-2.5 text-xs text-center" role="status" dir={dir}>{toast}</div>}
       {popup && selectedId != null && !route && (
         <div ref={popRef} className="absolute left-0 top-0 z-[650] pointer-events-none opacity-0 transition-opacity duration-200" style={{ width: "min(340px, calc(100% - 16px))" }} dir={dir}>
           <div className="pop-wrap pointer-events-auto relative">{popup}<i className="pop-arrow" /></div>
         </div>
       )}
-      <div className={`absolute top-0 z-[500] p-3 ${controlsSide === "left" ? "left-0" : "right-0"}`} dir={dir}
+      {/* phones: a fixed column of square buttons at the top right, as in the iTrack app (the hide/pin toolbar below is for desktop) */}
+      <div className="md:hidden absolute top-2 right-2 z-[500] flex flex-col gap-2" dir="ltr">
+        <MBtn on={menu} onClick={() => setMenu((v) => !v)} title={t("map.layers")}><Layers size={20} /></MBtn>
+        {menu && (
+          <div className="absolute top-0 right-12 glass p-2 space-y-1 text-sm min-w-40" dir={dir}>
+            {[["auto", t("map.auto")] as const, ...Object.entries(TILES).map(([k, s]) => [k, t(s.key)] as const)].map(([k, label]) => (
+              <button key={k} onClick={() => { setPrefs({ tile: k as typeof prefs.tile }); setMenu(false); }}
+                className={`block w-full text-start px-3 py-1.5 rounded-lg ${prefs.tile === k ? "btn-on border border-accent/40" : "active:bg-fg/5"}`}>{label}</button>
+            ))}
+          </div>
+        )}
+        {geofences.length > 0 && <MBtn on={showFences} onClick={() => setShowFences((v) => !v)} title={t("map.fences")}><Hexagon size={20} /></MBtn>}
+        {route ? <MBtn on={heat} onClick={() => setHeat((v) => !v)} title={t("map.heat")}><Flame size={20} /></MBtn> : (
+          <>
+            <MBtn on={labels} onClick={() => setPrefs({ labels: !labels })} title={t("map.labels")}><Tag size={20} /></MBtn>
+            <MBtn on={trails} onClick={() => setPrefs({ trails: !trails })} title={t("map.trails")}><RouteIcon size={20} /></MBtn>
+            <MBtn onClick={fitAll} title={t("map.fit")}><Crosshair size={20} /></MBtn>
+          </>
+        )}
+      </div>
+      <div className={`max-md:hidden absolute top-0 z-[500] p-3 ${controlsSide === "left" ? "left-0" : "right-0"}`} dir={dir}
         onPointerEnter={(e) => e.pointerType === "mouse" && canHover() && prefs.ctl === "auto" && enter()} onPointerLeave={(e) => e.pointerType === "mouse" && canHover() && leave()}>
       {!(prefs.ctl === "pinned" || (prefs.ctl === "auto" && (near || menu))) ? (
         <button className={`btn glass opacity-70 hover:opacity-100 ${controlsSide === "left" ? "" : "ms-auto"}`} title={t("map.showtools")} aria-label={t("map.showtools")}
@@ -468,9 +593,9 @@ export default function MapView({ devices = [], positions = [], selectedId, onSe
         )}
         {!route && legend && (
           <div className="glass p-2 space-y-1 text-[11px] min-w-36">
-            {([["over", prefs.cOver, "state.over"], ["moving", prefs.cMoving, "state.moving"], ["idle", prefs.cIdle, "state.idle"], ["stopped", prefs.cStopped, "state.stopped"], ["offline", prefs.cOffline, "state.offline"]] as const)
+            {([["over", prefs.cOver, "state.over"], ["moving", prefs.cMoving, "state.moving"], ["idle", prefs.cIdle, "state.idle"], ["stopped", prefs.cStopped, "state.stopped"]] as const)
               .map(([k, c, label]) => (
-                <div key={k} className="flex items-center gap-2"><i className="size-2.5 rounded-full shrink-0" style={{ background: c }} /><span className="flex-1">{t(label)}</span><b className="tabular-nums">{counts[k] + (k === "offline" ? counts.nofix : 0)}</b></div>
+                <div key={k} className="flex items-center gap-2"><i className="size-2.5 rounded-full shrink-0" style={{ background: c }} /><span className="flex-1">{t(label)}</span><b className="tabular-nums">{counts[k]}</b></div>
               ))}
           </div>
         )}

@@ -122,8 +122,7 @@ select.input { appearance: auto; }
 .vw { position: relative; width: 44px; height: 44px; }
 .veh { position: absolute; inset: 0; color: var(--c); transform: scale(var(--sb, 1)); transform-origin: 50% 50%; transition: transform .25s ease-out; }
 .veh.top { transform: scale(var(--s, 1)); }
-.veh.idle .shape, .veh.idle .badge { animation: idle 2.4s ease-in-out infinite; }
-@keyframes idle { 50% { opacity: .55; } }
+/* vehicle colours are steady in every state: nothing fades or blinks */
 .veh .heading { position: absolute; inset: 0; transition: none; }
 .veh .heading i {
   position: absolute; top: -3px; left: 50%; margin-left: -6px; width: 0; height: 0;
@@ -138,7 +137,9 @@ select.input { appearance: auto; }
 .veh.moving .badge::after, .veh.over .badge::after {
   content: ""; position: absolute; inset: -5px; border-radius: 50%; border: 2px solid var(--c); animation: pulse 1.8s infinite;
 }
-.veh.offline, .veh.unknown { opacity: .7; }
+/* no connection: drawn solid in exactly the "offline" colour of the settings, never see-through; a thin white edge keeps it readable on dark maps */
+.veh.offline .shape, .veh.unknown .shape, .veh.top.offline .shape, .veh.top.unknown .shape { filter: drop-shadow(0 0 1px rgba(255,255,255,.9)) drop-shadow(0 3px 5px rgba(0,0,0,.5)); }
+.veh.offline .badge, .veh.unknown .badge { background: #1f2937; }
 .veh.offline:not(.top) .heading, .veh.unknown:not(.top) .heading { display: none; }
 /* name tag beside the icon: white, dark text, same in both themes */
 .vw .lbl {
@@ -146,6 +147,9 @@ select.input { appearance: auto; }
   font-size: 12px; font-weight: 600; line-height: 1.5; padding: 1px 7px; border-radius: 4px; background: #fff; color: #111; border: 1px solid rgba(0,0,0,.18);
   box-shadow: 0 1px 4px rgba(0,0,0,.3);
 }
+/* playback: a parking stop on the route, numbered in time order */
+.pstop { position: relative; width: 22px; height: 22px; border-radius: 6px; background: #1d4ed8; color: #fff; font: 700 12px/22px system-ui, sans-serif; text-align: center; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.45); }
+.pstop small { position: absolute; top: -8px; right: -9px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px; background: #f59e0b; font-size: 9.5px; line-height: 15px; }
 @keyframes pulse { from { transform: scale(1); opacity: .8; } to { transform: scale(1.7); opacity: 0; } }
 
 html[lang="en"] body { font-family: var(--font-sans); }
@@ -166,10 +170,16 @@ html[lang="en"] body { font-family: var(--font-sans); }
 
 
 
-.veh.nofix { opacity: .85; }
-.veh.nofix:not(.top) .heading { display: none; }
-.veh.top.nofix .shape, .veh.top.offline .shape { opacity: .55; filter: grayscale(.5) drop-shadow(0 3px 5px rgba(0,0,0,.5)); }
-.veh.nofix .badge { border-style: dashed; }
+.locate-ctl a { display: grid; place-items: center; }
+.locate-ctl a.on { color: #2563eb; }
+
+/* phone map tools: square grey buttons in a fixed column; a lit button is a feature that is on */
+.mbtn { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 9px; color: #fff; background: rgba(88,88,94,.8); backdrop-filter: blur(4px); box-shadow: 0 2px 8px rgba(0,0,0,.3); }
+.mbtn.on { background: color-mix(in srgb, var(--accent) 80%, #000); }
+.mbtn:active { transform: scale(.94); }
+
+/* the red "no entry" sign of a lost connection: centred on the vehicle, never rotated with it */
+.veh .nolink { position: absolute; left: 50%; top: 50%; margin: -10px 0 0 -10px; filter: drop-shadow(0 1px 3px rgba(0,0,0,.55)); pointer-events: none; }
 
 /* ---------- print / PDF ---------- */
 @media print {
@@ -206,6 +216,8 @@ html[lang="en"] body { font-family: var(--font-sans); }
 .vcard-toggle svg { transition: transform .2s; }
 .vcard-btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; border-radius: 10px; font-size: 13px; background: rgba(255,255,255,.12); color: #fff; }
 .vcard-btn:hover { background: rgba(255,255,255,.2); }
+/* phones: the bottom action bar already offers these, so the card keeps only what the bar lacks */
+@media (max-width: 767px) { .vcard-btn.vdup { display: none; } }
 /* tail in the card colour; clipped to its outer half so the translucent colour doesn't double up over the card */
 .pop-wrap:has(.vcard) .pop-arrow { background: rgba(58,58,60,.9); border: 0; clip-path: polygon(100% 0, 100% 100%, 0 100%); }
 
@@ -232,4 +244,6 @@ body { overscroll-behavior: none; }
   .overflow-x-auto { scrollbar-width: none; -webkit-overflow-scrolling: touch; }
   .overflow-x-auto::-webkit-scrollbar { display: none; }
   .leaflet-bottom { margin-bottom: 44px; }
+  /* the selected-vehicle bar covers the bottom edge: keep the zoom / my-location buttons above it */
+  .sel-bar .leaflet-bottom { margin-bottom: 138px; }
 }

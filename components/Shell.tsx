@@ -18,9 +18,10 @@ const NAV: { href: string; label: Key; icon: typeof Map }[] = [
 ];
 
 const SHORT: Record<string, Key> = { "/live": "navs.live", "/events": "navs.events", "/analytics": "nav.analytics" };
-// phones: four main tabs + a "More" sheet (alerts, settings, theme, language, sign out), which the desktop header normally holds
-const TABS = ["/live", "/devices", "/dashboard", "/reports"];
-const MORE = ["/events", "/settings"];
+// phones: four main tabs, ordered like the iTrack app (map, vehicles, alerts), + a "More" sheet (reports, settings, theme,
+// language, sign out), which the desktop header normally holds
+const TABS = ["/live", "/devices", "/events", "/dashboard"];
+const MORE = ["/reports", "/settings"];
 const THEME_NEXT = { dark: "light", light: "system", system: "dark" } as const;
 
 export default function Shell({ children, user }: { children: React.ReactNode; user: string }) {

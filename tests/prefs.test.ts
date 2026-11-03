@@ -33,9 +33,9 @@ test("cookie parsing still works", () => {
 
 test("approved defaults (settings screenshot)", () => {
   assert.deepEqual(DEFAULT_PREFS, {
-    theme: "light", nav: "end", navMode: "hover", list: "start", listMode: "hover", limit: 80, trails: true, labels: true,
-    tile: "light", geo: "server", colorMode: "state", cMoving: "#22c55e", cIdle: "#f59e0b", cStopped: "#70cfff", cOver: "#f01919",
-    cOffline: "#64748b", autoScale: true, iconSize: 1.4, ctl: "auto",
+    theme: "light", nav: "end", navMode: "hover", list: "start", listMode: "hover", limit: 80, trails: false, labels: true,
+    tile: "sat", geo: "server", colorMode: "state", cMoving: "#23e76a", cIdle: "#f59e0b", cStopped: "#27aef1", cOver: "#f20202",
+    cOffline: "#727374", autoScale: true, iconSize: 1.4, ctl: "auto",
   });
 });
 

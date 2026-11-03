@@ -5,13 +5,17 @@ import { Check, Loader2, X } from "lucide-react";
 import type { Device } from "@/lib/types";
 import { updateDevice } from "@/lib/api";
 import { CATEGORIES, COLORS, deviceColor } from "@/lib/vehicle";
+import { infoAttr } from "@/lib/vinfo";
 import { useI18n } from "@/lib/i18n";
 import type { Key } from "@/lib/dict";
 
 export default function DeviceEditor({ device, onClose }: { device: Device; onClose: () => void }) {
   const { t } = useI18n();
   const [name, setName] = useState(device.name);
+  const [model, setModel] = useState(device.model ?? "");
   const [cat, setCat] = useState(device.category || "default");
+  const [phone, setPhone] = useState(device.phone ?? "");
+  const [iccid, setIccid] = useState(infoAttr(device, "iccid"));
   const [color, setColor] = useState<string | null>(deviceColor(device));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -24,7 +28,8 @@ export default function DeviceEditor({ device, onClose }: { device: Device; onCl
       await updateDevice(device.id, (d) => {
         const attributes = { ...d.attributes };
         if (color) attributes.tracarColor = color; else delete attributes.tracarColor;
-        return { ...d, name: name.trim() || d.name, category: cat === "default" ? null : cat, attributes };
+        if (iccid.trim()) attributes.iccid = iccid.trim(); else delete attributes.iccid;
+        return { ...d, name: name.trim() || d.name, model: model.trim() || null, phone: phone.trim() || null, category: cat === "default" ? null : cat, attributes };
       });
       onClose();
     } catch { setErr(t("edit.error")); setBusy(false); }
@@ -43,6 +48,18 @@ export default function DeviceEditor({ device, onClose }: { device: Device; onCl
         <label className="block text-xs text-muted space-y-1.5">{t("edit.name")}
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
         </label>
+        <label className="block text-xs text-muted space-y-1.5">{t("edit.model")}
+          <input className="input" dir="ltr" value={model} onChange={(e) => setModel(e.target.value)} />
+        </label>
+
+        <div className="rounded-2xl border border-line p-3 space-y-3">
+          <p className="text-xs font-medium">{t("edit.reg")}</p>
+          <div className="text-xs text-muted">{t("info.imei")}
+            <div className="text-base font-semibold text-fg tabular-nums pt-0.5" dir="ltr">{device.uniqueId}</div>
+          </div>
+          <label className="block text-xs text-muted space-y-1.5">{t("info.sim")}<input className="input !text-base font-semibold tabular-nums" dir="ltr" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} /></label>
+          <label className="block text-xs text-muted space-y-1.5">{t("info.iccid")}<input className="input" dir="ltr" value={iccid} onChange={(e) => setIccid(e.target.value)} /></label>
+        </div>
 
         <div>
           <p className="text-xs text-muted mb-2">{t("edit.type")}</p>

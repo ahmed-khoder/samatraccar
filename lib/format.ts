@@ -145,9 +145,14 @@ export function fixAt(p: Times): string | null {
 
 const FRESH_MS = 5 * 60000;
 
+/** The tracker is connected but its coordinates are not a usable measurement (no valid fix, or a pre-2020 receiver date). */
+export const noFix = (p?: { fixTime: string; valid?: boolean } | null) => !!p && (!hasRealFix(p) || p.valid === false);
+
 export function deviceState(d: { status: string }, p?: Fix) {
   if (d.status !== "online") return d.status === "offline" ? "offline" : "unknown";
-  if (p && (!hasRealFix(p) || p.valid === false)) return "nofix"; // no GPS fix: the coordinates are not a current measurement
+  // a connected tracker without a usable GPS fix (indoors, under a roof) is shown like any parked vehicle: blue, with its
+  // stopped-for timer; only a lost connection looks different. Its coordinates are not a current measurement, so it is never "moving".
+  if (noFix(p)) return "stopped";
   // a repeated old location keeps the speed it had back then — that is not "moving now"
   const at = p ? fixAt(p) : null;
   const fresh = !!at && Date.now() - Date.parse(at) < FRESH_MS;
@@ -166,6 +171,9 @@ export type VisualState = "over" | "moving" | "idle" | "stopped" | "offline" | "
 
 /** Finer-grained status for colouring: overspeed, and stopped-with-engine-on ("idle"). */
 export function visualState(base: string, kmh: number, limit: number, ignition?: boolean): VisualState {
+  // a vehicle that stopped reporting looks like any parked one (blue, "stopped"); only a cut SIM gets a mark of its own, the red
+  // sign drawn by the map and the list
+  if (base === "offline" || base === "unknown") return "stopped";
   if (base === "moving") return kmh > limit ? "over" : "moving";
   if (base === "stopped") return ignition ? "idle" : "stopped";
   return base === "nofix" ? "nofix" : "offline";

@@ -1,7 +1,7 @@
 // Behaviour tests for live GPS handling. Run with `npm test` (Node's built-in runner, TypeScript stripped natively).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clockAhead, deviceState, fixAt } from "../lib/format.ts";
+import { clockAhead, deviceState, fixAt, noFix } from "../lib/format.ts";
 import { mergePolled, mergePushed, newestSane } from "../lib/live-merge.ts";
 import type { Position } from "../lib/types.ts";
 
@@ -22,12 +22,12 @@ test("an old fix repeated by a status packet is not moving, whatever its speed",
   assert.equal(deviceState(online, { fixTime: iso(now - 10 * H), serverTime: iso(now - 60000), speed: 7.6, valid: true }), "stopped");
 });
 
-test("an invalid fix is shown as no GPS fix", () => {
-  assert.equal(deviceState(online, { fixTime: iso(now - 5000), serverTime: iso(now), speed: 20, valid: false }), "nofix");
+test("a connected tracker with an invalid fix looks like any parked vehicle", () => {
+  assert.equal(deviceState(online, { fixTime: iso(now - 5000), serverTime: iso(now), speed: 20, valid: false }), "stopped");
 });
 
-test("a pre-2020 fix is no GPS fix; offline stays offline", () => {
-  assert.equal(deviceState(online, { fixTime: "1980-01-06T00:00:19Z", serverTime: iso(now), speed: 0 }), "nofix");
+test("a pre-2020 fix is also parked; offline stays offline", () => {
+  assert.equal(deviceState(online, { fixTime: "1980-01-06T00:00:19Z", serverTime: iso(now), speed: 0 }), "stopped");
   assert.equal(deviceState({ status: "offline" }, { fixTime: iso(now), serverTime: iso(now), speed: 20 }), "offline");
 });
 
@@ -89,4 +89,11 @@ test("transition: an old status packet that only looks sane is ignored when it a
   assert.equal(newestSane([oldCopy], null, since), null);
   const real = pos({ id: 8, deviceId: 73, fixTime: iso(now - 10 * 60000), serverTime: iso(now - 10 * 60000 + 900) });
   assert.equal(newestSane([oldCopy, real], null, since)?.id, 8);
+});
+
+test("noFix: connected tracker without a usable fix", () => {
+  assert.equal(noFix({ fixTime: iso(now), valid: false }), true);
+  assert.equal(noFix({ fixTime: "1980-01-06T00:00:19Z", valid: true }), true);
+  assert.equal(noFix({ fixTime: iso(now), valid: true }), false);
+  assert.equal(noFix(undefined), false);
 });
